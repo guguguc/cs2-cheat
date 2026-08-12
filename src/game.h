@@ -27,6 +27,10 @@ struct Player {
     float distance_m = 0.f;
     // Radar frame: x = right of local, y = forward of local (meters).
     Vector2 radar_xy;
+    // Bone skeleton: parent indices + per-bone world positions (Source units).
+    std::vector<int> bone_parents;   // parent bone index per bone (0xFFFF = root)
+    std::vector<Vector3> bone_pos;   // world position per bone (1:1 with parents)
+    std::vector<std::uint32_t> bone_flags;
 };
 
 // Immutable per-frame state handed to renderers and the demo feed.
@@ -74,6 +78,8 @@ private:
     void read_player(const Memory& mem, std::uintptr_t addr,
                      bool is_local, Player& out) const;
     bool read_bone(const Memory& mem, std::uintptr_t pawn, int bone, Vector3& out) const;
+    // Reads the full bone skeleton (parents / world positions / flags).
+    void read_skeleton(const Memory& mem, std::uintptr_t pawn, Player& out) const;
     void project_radar(const Player& local, Player& p) const;
     // Osiris CConcreteEntityList chunk traversal.
     std::uintptr_t entity_by_index_impl(const Memory& mem, int index) const;

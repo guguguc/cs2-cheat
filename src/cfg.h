@@ -21,6 +21,18 @@ struct OffsetCfg {
     std::uintptr_t m_pAimPunchServices = 0x1440;   // C_CSPlayerPawn -> CCSPlayer_AimPunchServices
     std::uintptr_t aimPunchCache      = 0x88;      // CCSPlayer_AimPunchServices::m_aimPunchCache (CUtlVector<QAngle>)
     std::uintptr_t m_iShotsFired      = 0x2B1C;    // C_CSPlayerPawn::m_iShotsFired
+    // ---- bone chain (Linux, verified by scripts/scan_bones.py) -------------
+    std::uintptr_t m_pGameSceneNode   = 0x4A0;     // C_BaseEntity::m_pGameSceneNode
+    std::uintptr_t m_modelState       = 0x140;     // CSkeletonInstance::m_modelState (EMBEDDED CModelState)
+    std::uintptr_t boneStateData      = 0x80;      // CModelState::bone_state_data (CUtlVector<CBoneStateData>)
+    std::uintptr_t m_hModel           = 0xA0;      // CModelState::m_hModel (handle; deref once)
+    std::uintptr_t boneCount          = 0x160;     // CModel::bone_count
+    std::uintptr_t boneNames          = 0x168;     // CModel::bone_names (PtrCStr array)
+    std::uintptr_t boneParents        = 0x180;     // CModel::bone_parents (u16 array)
+    std::uintptr_t boneFlags          = 0x1B0;     // CModel::bone_flags (u32 array)
+    std::uintptr_t boneElementSize    = 0x20;      // CBoneStateData stride
+    int            boneHeadIndex      = 7;         // head_0
+    int            boneNeckIndex      = 6;         // neck_0
     std::uintptr_t m_vecVelocity      = 0x5A0;
     std::uintptr_t m_flFlashOverlayAlpha = 0x13A4;
     std::uintptr_t dwLocalPlayerPawn  = 0x4802768;

@@ -7,6 +7,7 @@
 #include "imgui.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 
 namespace {
@@ -21,6 +22,11 @@ ImU32 health_color(int hp) {
     if (hp > 30) return IM_COL32(255, 235, 60, 255);
     return IM_COL32(255, 60, 60, 255);
 }
+
+// CS2 BoneFlags: FlagHitbox = 0x200. Only draw bones that participate in
+// hitbox checks so the skeleton skips cosmetic/attachment bones (Valthrun
+// applies the same filter).
+constexpr std::uint32_t kBoneFlagHitbox = 0x200;
 
 }  // namespace
 
@@ -46,12 +52,31 @@ void esp(SharedCtx& ctx, const ImVec2& display) {
                            static_cast<int>(sh), head))
             continue;
 
+        const ImU32 col = team_color(p.team, p.team == snap.local.team);
+
+        // ---- skeleton: parent -> child bone lines ----
+        const std::size_t n = std::min(p.bone_parents.size(), p.bone_pos.size());
+        for (std::size_t i = 0; i < n; ++i) {
+            if (i < p.bone_flags.size() &&
+                (p.bone_flags[i] & kBoneFlagHitbox) == 0)
+                continue;  // only hitbox bones (same filter as Valthrun)
+            const int parent = p.bone_parents[i];
+            if (parent < 0 || parent >= static_cast<int>(n)) continue;
+            Vector2 a, b;
+            if (!WorldToScreen(p.bone_pos[parent], snap.view_matrix,
+                               static_cast<int>(sw), static_cast<int>(sh), a))
+                continue;
+            if (!WorldToScreen(p.bone_pos[i], snap.view_matrix,
+                               static_cast<int>(sw), static_cast<int>(sh), b))
+                continue;
+            dl->AddLine({a.x, a.y}, {b.x, b.y}, col, 1.2f);
+        }
+
         const float box_h = feet.y - head.y;
         if (box_h < 8.f) continue;
         const float box_w = std::max(4.f, box_h * 0.55f);
         const ImVec2 a{feet.x - box_w * 0.5f, head.y};
         const ImVec2 b{feet.x + box_w * 0.5f, feet.y};
-        const ImU32 col = team_color(p.team, p.team == snap.local.team);
 
         dl->AddRect(a, b, col, 0.f, 0, 1.5f);
 

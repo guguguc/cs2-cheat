@@ -48,9 +48,12 @@ inline constexpr std::uintptr_t BONE_ARRAY_OFFSET = 0x80;     // bone-matrix ptr
 
 // ---- bones (CS2 skeleton) ---------------------------------------------------
 namespace bones {
-inline constexpr int head  = 6;
-inline constexpr int neck  = 5;
-inline constexpr int chest = 4;
+// Verified against the live Linux build by scripts/scan_bones.py:
+// head_0=7, neck_0=6, spine_3=5 ... pelvis=1, root_motion=0.
+// (Older hardcoded 6/5/4 pointed at neck/spine/chest - off by one.)
+inline constexpr int head  = 7;
+inline constexpr int neck  = 6;
+inline constexpr int chest = 5;
 }
 
 // ---- process / module -------------------------------------------------------

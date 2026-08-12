@@ -124,9 +124,11 @@ void Game::read_player(const Memory& mem, std::uintptr_t addr,
         out.feet = mem.read<Vector3>(*scene + offsets::SCENE_NODE_ORIGIN).value_or({});
     out.velocity = mem.read<Vector3>(addr + cs2cfg().offsets.m_vecVelocity).value_or({});
 
-    Vector3 head;
-    if (read_bone(mem, addr, offsets::bones::head, head) && head.Length() > 0.001f) {
-        out.head = head;
+    // Head = head_0 bone (index from config; 7 on current Linux build).
+    read_skeleton(mem, addr, out);
+    if (out.bone_pos.size() > static_cast<std::size_t>(cs2cfg().offsets.boneHeadIndex) &&
+        out.bone_pos[cs2cfg().offsets.boneHeadIndex].Length() > 0.001f) {
+        out.head = out.bone_pos[cs2cfg().offsets.boneHeadIndex];
     } else {
         out.head = out.feet + Vector3{0.f, 0.f, 72.f};  // fallback: ~standing height
     }
@@ -134,15 +136,59 @@ void Game::read_player(const Memory& mem, std::uintptr_t addr,
 }
 
 bool Game::read_bone(const Memory& mem, std::uintptr_t pawn, int bone, Vector3& out) const {
-    const auto scene = mem.read<std::uintptr_t>(pawn + off_.m_pGameSceneNode);
+    const auto scene = mem.read<std::uintptr_t>(pawn + cs2cfg().offsets.m_pGameSceneNode);
     if (!scene || !*scene) return false;
     const auto bone_array =
-        mem.read<std::uintptr_t>(*scene + offsets::m_modelState + offsets::BONE_ARRAY_OFFSET);
+        mem.read<std::uintptr_t>(*scene + cs2cfg().offsets.m_modelState +
+                                 cs2cfg().offsets.boneStateData);
     if (!bone_array || !*bone_array) return false;
-    const auto v = mem.read<Vector3>(*bone_array + static_cast<std::uintptr_t>(bone) * 32);
+    const auto v = mem.read<Vector3>(
+        *bone_array + static_cast<std::uintptr_t>(bone) * cs2cfg().offsets.boneElementSize);
     if (!v) return false;
     out = *v;
     return true;
+}
+
+void Game::read_skeleton(const Memory& mem, std::uintptr_t pawn, Player& out) const {
+    // Reads the per-frame bone transforms (CUtlVector<CBoneStateData> embedded
+    // inside CModelState at scene_node + m_modelState; boneStateData is the
+    // vector's data pointer) and the static bone table (CModel).
+    out.bone_parents.clear();
+    out.bone_pos.clear();
+    out.bone_flags.clear();
+
+    const auto scene = mem.read<std::uintptr_t>(pawn + cs2cfg().offsets.m_pGameSceneNode);
+    if (!scene || !*scene) return;
+
+    const auto bsd =
+        mem.read<std::uintptr_t>(*scene + cs2cfg().offsets.m_modelState +
+                                 cs2cfg().offsets.boneStateData);
+    if (!bsd || !*bsd) return;
+
+    // Model handle: CModelState + m_hModel -> deref once -> CModel.
+    const auto hm = mem.read<std::uintptr_t>(*scene + cs2cfg().offsets.m_modelState +
+                                             cs2cfg().offsets.m_hModel);
+    const std::uintptr_t cmodel = hm ? mem.read<std::uintptr_t>(*hm).value_or(0) : 0;
+    if (!cmodel) return;
+
+    const auto count = mem.read<int>(cmodel + cs2cfg().offsets.boneCount).value_or(0);
+    if (count <= 0 || count > 2000) return;
+    const auto names = mem.read<std::uintptr_t>(cmodel + cs2cfg().offsets.boneNames).value_or(0);
+    const auto parents = mem.read<std::uintptr_t>(cmodel + cs2cfg().offsets.boneParents).value_or(0);
+    const auto flags = mem.read<std::uintptr_t>(cmodel + cs2cfg().offsets.boneFlags).value_or(0);
+    if (!names || !parents || !flags) return;
+
+    out.bone_parents.reserve(count);
+    out.bone_pos.reserve(count);
+    out.bone_flags.reserve(count);
+    for (int i = 0; i < count; ++i) {
+        const auto p = mem.read<Vector3>(*bsd + static_cast<std::uintptr_t>(i) *
+                                                   cs2cfg().offsets.boneElementSize);
+        if (p) out.bone_pos.push_back(*p);
+        else out.bone_pos.emplace_back();  // keep 1:1 with parents
+        out.bone_parents.push_back(mem.read<std::uint16_t>(parents + i * 2).value_or(0xFFFF));
+        out.bone_flags.push_back(mem.read<std::uint32_t>(flags + i * 4).value_or(0));
+    }
 }
 
 void Game::project_radar(const Player& local, Player& p) const {

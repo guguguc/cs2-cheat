@@ -93,6 +93,19 @@ static Config& cfg_impl() {
             set("m_pAimPunchServices", c.offsets.m_pAimPunchServices);
             set("aimPunchCache", c.offsets.aimPunchCache);
             set("m_iShotsFired", c.offsets.m_iShotsFired);
+            set("m_pGameSceneNode", c.offsets.m_pGameSceneNode);
+            set("m_modelState", c.offsets.m_modelState);
+            set("boneStateData", c.offsets.boneStateData);
+            set("m_hModel", c.offsets.m_hModel);
+            set("boneCount", c.offsets.boneCount);
+            set("boneNames", c.offsets.boneNames);
+            set("boneParents", c.offsets.boneParents);
+            set("boneFlags", c.offsets.boneFlags);
+            set("boneElementSize", c.offsets.boneElementSize);
+            if (offs.contains("boneHeadIndex") && offs["boneHeadIndex"].is_number())
+                c.offsets.boneHeadIndex = offs["boneHeadIndex"].get<int>();
+            if (offs.contains("boneNeckIndex") && offs["boneNeckIndex"].is_number())
+                c.offsets.boneNeckIndex = offs["boneNeckIndex"].get<int>();
             set("m_vecVelocity", c.offsets.m_vecVelocity);
             set("m_flFlashOverlayAlpha", c.offsets.m_flFlashOverlayAlpha);
             set("dwLocalPlayerPawn", c.offsets.dwLocalPlayerPawn);
