@@ -69,9 +69,8 @@ void data_thread() {
     if (input_obj) {
         game.set_view_angle_source(input_obj + 0x9C);  // real view angles
         uinput_aim::set_input_obj(input_obj);
-        // Create the virtual device lazily on first aim (in-match, so it never
-        // collides with the game's raw-input init) and keep it alive (no
-        // destroy -> no pointer-warp self-move on release).
+        // Virtual uinput mouse, created lazily on first aim, destroyed on
+        // aim-key release (the "hotplug" configuration).
         game.set_angles_override([](const Vector3& a, bool) {
             uinput_aim::move_to(a.x, a.y);
         });
@@ -111,6 +110,8 @@ void data_thread() {
                  g_ctx.aim_on ? 1 : 0, g_ctx.aim_hold ? 1 : 0);
         }
         if (!steered || g_ctx.panel_open) uinput_aim::set_fire(false);
+        // Destroy the virtual device when the aim key is released.
+        if (!aim) uinput_aim::shutdown();
         trigger.run(game, mem, trig);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(16));

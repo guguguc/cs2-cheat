@@ -1,0 +1,93 @@
+#include "overlay_draw.h"
+
+#include "config.h"
+#include "math.h"
+#include "overlay_ctx.h"
+
+#include "imgui.h"
+
+#include <algorithm>
+#include <cstdio>
+
+namespace {
+
+ImU32 team_color(int team, bool teammate) {
+    if (teammate) return IM_COL32(170, 170, 170, 255);
+    return team == 2 ? IM_COL32(255, 90, 90, 255) : IM_COL32(90, 190, 255, 255);
+}
+
+ImU32 health_color(int hp) {
+    if (hp > 60) return IM_COL32(0, 255, 110, 255);
+    if (hp > 30) return IM_COL32(255, 235, 60, 255);
+    return IM_COL32(255, 60, 60, 255);
+}
+
+}  // namespace
+
+namespace overlay_draw {
+
+void esp(SharedCtx& ctx, const ImVec2& display) {
+    if (!ctx.esp_on || !ctx.valid) return;
+    const Snapshot& snap = ctx.snap;
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    const float sw = display.x;
+    const float sh = display.y;
+
+    for (const Player& p : snap.players) {
+        if (!p.valid || !p.alive) continue;
+        if (!cfg::ESP_SHOW_TEAMMATES && p.team == snap.local.team) continue;
+        if (ctx.esp_max_dist > 0.f && p.distance_m > ctx.esp_max_dist) continue;
+
+        Vector2 feet, head;
+        if (!WorldToScreen(p.feet, snap.view_matrix, static_cast<int>(sw),
+                           static_cast<int>(sh), feet))
+            continue;
+        if (!WorldToScreen(p.head, snap.view_matrix, static_cast<int>(sw),
+                           static_cast<int>(sh), head))
+            continue;
+
+        const float box_h = feet.y - head.y;
+        if (box_h < 8.f) continue;
+        const float box_w = std::max(4.f, box_h * 0.55f);
+        const ImVec2 a{feet.x - box_w * 0.5f, head.y};
+        const ImVec2 b{feet.x + box_w * 0.5f, feet.y};
+        const ImU32 col = team_color(p.team, p.team == snap.local.team);
+
+        dl->AddRect(a, b, col, 0.f, 0, 1.5f);
+
+        const float bar_h = box_h * std::clamp(p.health, 0, 100) / 100.f;
+        dl->AddRectFilled({a.x - 5.f, b.y - bar_h}, {a.x - 3.f, b.y},
+                          health_color(p.health));
+
+        char buf[64];
+        std::snprintf(buf, sizeof(buf), "%d HP  %.0fm", p.health, p.distance_m);
+        dl->AddText({b.x + 4.f, a.y}, IM_COL32(255, 255, 255, 235), buf);
+    }
+}
+
+void panel(SharedCtx& ctx) {
+    if (!ctx.panel_open) return;
+    ImGui::SetNextWindowPos({12.f, 12.f}, ImGuiCond_FirstUseEver);
+    ImGui::Begin("cs2-internal", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+
+    ImGui::Checkbox("ESP", &ctx.esp_on);
+    ImGui::Checkbox("Aimbot", &ctx.aim_on);
+    ImGui::Checkbox("Triggerbot", &ctx.trigger_on);
+
+    ImGui::Separator();
+    ImGui::SliderFloat("FOV (deg)", &ctx.aim_fov, 1.f, 60.f, "%.1f");
+    ImGui::SliderFloat("Smooth", &ctx.aim_smooth, 1.f, 30.f, "%.1f");
+    ImGui::SliderFloat("Max dist (m)", &ctx.esp_max_dist, 10.f, 400.f, "%.0f");
+
+    ImGui::Separator();
+    ImGui::TextDisabled("game: %s", ctx.valid ? "connected - in match" : "not in match");
+    int enemies = 0;
+    for (const Player& p : ctx.snap.players) {
+        if (p.valid && p.alive && p.team != ctx.snap.local.team) ++enemies;
+    }
+    ImGui::TextDisabled("enemies: %d", enemies);
+    ImGui::TextDisabled("press F1 to close menu");
+    ImGui::End();
+}
+
+}  // namespace overlay_draw

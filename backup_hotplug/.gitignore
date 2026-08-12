@@ -1,0 +1,18 @@
+build*/
+cmake-build-*/
+*.o
+*.a
+*.so
+cs2_cheat
+math_test
+.cache/
+# IDA analysis database + local game-binary copy (large, regenerable)
+data/
+*.i64
+*.idb
+*.id0
+*.id1
+*.id2
+*.nam
+*.til
+imgui.ini

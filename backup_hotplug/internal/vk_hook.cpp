@@ -552,15 +552,7 @@ extern "C" VkResult detour_present(VkQueue queue, const VkPresentInfoKHR* pi) {
         // NOTE: the overlay's Vulkan objects are built inside
         // detour_create_swapchain_game (the game is not presenting then).
         // Creating pipelines here would deadlock the NVIDIA driver.
-        // Diagnostic opt-out: `touch /tmp/cs2_no_overlay` skips the ImGui
-        // overlay (isolates whether present-hook rendering affects the game).
-        static bool no_overlay = false;
-        static auto last_chk = std::chrono::steady_clock::now();
-        if (std::chrono::steady_clock::now() - last_chk > std::chrono::seconds(1)) {
-            last_chk = std::chrono::steady_clock::now();
-            no_overlay = static_cast<bool>(std::ifstream("/tmp/cs2_no_overlay"));
-        }
-        if (g_ready && !no_overlay) render_frame(queue, idx);
+        if (g_ready) render_frame(queue, idx);
         else if (!g_format_warned_ && g_format == VK_FORMAT_UNDEFINED) {
             g_format_warned_ = true;
             log_("vk_hook: swapchain format unknown - the overlay was likely injected "
