@@ -143,6 +143,7 @@ bool resolve(int pid, Resolved& out) {
     const auto ranges = executable_ranges(pid);
     if (ranges.empty()) {
         std::fprintf(stderr, "patterns: no executable libclient.so segment found\n");
+        plog("patterns: FAILED no executable libclient.so segment\n");
         return false;
     }
 
@@ -152,10 +153,13 @@ bool resolve(int pid, Resolved& out) {
     if (!read_text(mem, ranges.front(), text)) {
         std::fprintf(stderr, "patterns: failed to read libclient.so .text (%zu MiB)\n",
                      ranges.front().size >> 20);
+        plog("patterns: FAILED read .text (%zu MiB)\n", ranges.front().size >> 20);
         return false;
     }
     std::fprintf(stderr, "patterns: scanned %zu MiB of libclient.so code\n",
                  ranges.front().size >> 20);
+    plog("patterns: scanned %zu MiB @0x%llx\n", ranges.front().size >> 20,
+         static_cast<unsigned long long>(ranges.front().start));
 
     plog("patterns: loading config\n");
     const auto& conf = cs2cfg();
@@ -206,6 +210,9 @@ bool resolve(int pid, Resolved& out) {
                 break;
             }
         }
+        plog("patterns: %-22s found=%d occ=%d val=0x%llx\n", pc.name.c_str(),
+             s.scan.found ? 1 : 0, s.scan.occurrences,
+             static_cast<unsigned long long>(s.value));
         slots.push_back(std::move(s));
     }
 
@@ -233,6 +240,7 @@ bool resolve(int pid, Resolved& out) {
         const std::uintptr_t v = get(name.c_str());
         if (v == 0) {
             std::fprintf(stderr, "patterns: MISSING pattern: %s\n", name.c_str());
+            plog("patterns: MISSING pattern: %s\n", name.c_str());
             out.ok = false;
         }
     }
@@ -245,6 +253,13 @@ bool resolve(int pid, Resolved& out) {
                  static_cast<unsigned long long>(out.localPlayerController),
                  static_cast<unsigned long long>(out.viewMatrix), out.m_pWeaponServices,
                  out.m_bIsScoped);
+    plog("patterns: resolved ok=%d -> gs=0x%llx listOff=%d scene=%d health=%d life=%d team=%d "
+         "hPawn=%d ctrl=0x%llx viewMatrix=0x%llx\n",
+         out.ok ? 1 : 0,
+         static_cast<unsigned long long>(out.gameEntitySystem), out.entityListOffset,
+         out.m_pGameSceneNode, out.m_iHealth, out.m_lifeState, out.m_iTeamNum, out.m_hPawn,
+         static_cast<unsigned long long>(out.localPlayerController),
+         static_cast<unsigned long long>(out.viewMatrix));
     return out.ok;
 }
 
