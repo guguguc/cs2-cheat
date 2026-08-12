@@ -18,6 +18,9 @@ struct OffsetCfg {
     std::uintptr_t m_vecViewOffset    = 0xDF8;
     std::uintptr_t m_ArmorValue       = 0x2B34;
     std::uintptr_t m_iIDEntIndex      = 0x42C4;
+    std::uintptr_t m_pAimPunchServices = 0x1440;   // C_CSPlayerPawn -> CCSPlayer_AimPunchServices
+    std::uintptr_t aimPunchCache      = 0x88;      // CCSPlayer_AimPunchServices::m_aimPunchCache (CUtlVector<QAngle>)
+    std::uintptr_t m_iShotsFired      = 0x2B1C;    // C_CSPlayerPawn::m_iShotsFired
     std::uintptr_t m_vecVelocity      = 0x5A0;
     std::uintptr_t m_flFlashOverlayAlpha = 0x13A4;
     std::uintptr_t dwLocalPlayerPawn  = 0x4802768;

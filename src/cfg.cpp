@@ -90,6 +90,9 @@ static Config& cfg_impl() {
             set("m_vecViewOffset", c.offsets.m_vecViewOffset);
             set("m_ArmorValue", c.offsets.m_ArmorValue);
             set("m_iIDEntIndex", c.offsets.m_iIDEntIndex);
+            set("m_pAimPunchServices", c.offsets.m_pAimPunchServices);
+            set("aimPunchCache", c.offsets.aimPunchCache);
+            set("m_iShotsFired", c.offsets.m_iShotsFired);
             set("m_vecVelocity", c.offsets.m_vecVelocity);
             set("m_flFlashOverlayAlpha", c.offsets.m_flFlashOverlayAlpha);
             set("dwLocalPlayerPawn", c.offsets.dwLocalPlayerPawn);
