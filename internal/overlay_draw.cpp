@@ -23,10 +23,10 @@ ImU32 health_color(int hp) {
     return IM_COL32(255, 60, 60, 255);
 }
 
-// CS2 BoneFlags: FlagHitbox = 0x200. Only draw bones that participate in
+// CS2 BoneFlags: FlagHitbox = 0x100 (Valthrun model.rs). Only draw bones that participate in
 // hitbox checks so the skeleton skips cosmetic/attachment bones (Valthrun
 // applies the same filter).
-constexpr std::uint32_t kBoneFlagHitbox = 0x200;
+constexpr std::uint32_t kBoneFlagHitbox = 0x100;
 
 }  // namespace
 
