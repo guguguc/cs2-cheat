@@ -43,6 +43,7 @@ void log_(const char* fmt, ...) {
 }
 
 void data_thread() {
+    log_("data_thread: start\n");
     Memory mem;
     mem.attach(getpid());
     patterns::Resolved off;

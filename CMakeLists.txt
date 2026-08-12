@@ -73,6 +73,7 @@ if(BUILD_INTERNAL)
             internal/vk_hook.cpp
             internal/input_x11.cpp
             internal/overlay_draw.cpp
+            src/cfg.cpp
             src/patterns.cpp
             src/game.cpp
             src/memory.cpp

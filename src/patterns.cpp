@@ -7,6 +7,7 @@
 #include <sys/uio.h>
 
 #include <algorithm>
+#include <cstdarg>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -17,6 +18,17 @@
 #include <vector>
 
 namespace {
+
+void plog(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+void plog(const char* fmt, ...) {
+    FILE* f = std::fopen("/tmp/cs2_internal.log", "a");
+    if (!f) return;
+    va_list ap;
+    va_start(ap, fmt);
+    std::vfprintf(f, fmt, ap);
+    va_end(ap);
+    std::fclose(f);
+}
 
 constexpr std::uint32_t kWildcard = 0x100;  // sentinel for '?' in a pattern
 constexpr std::size_t kReadChunk = 1u << 20;  // 1 MiB per process_vm_readv
@@ -68,7 +80,7 @@ std::vector<std::uint32_t> parse_pattern(const char* hex) {
     std::istringstream ss(hex);
     std::string tok;
     while (ss >> tok) {
-        if (tok == "?") {
+        if (tok == "?" || tok == "??") {
             out.push_back(kWildcard);
         } else {
             out.push_back(static_cast<std::uint32_t>(std::stoul(tok, nullptr, 16)));
@@ -127,6 +139,7 @@ struct Slot {
 }  // namespace
 
 bool resolve(int pid, Resolved& out) {
+    plog("patterns: resolve start\n");
     const auto ranges = executable_ranges(pid);
     if (ranges.empty()) {
         std::fprintf(stderr, "patterns: no executable libclient.so segment found\n");
@@ -144,7 +157,9 @@ bool resolve(int pid, Resolved& out) {
     std::fprintf(stderr, "patterns: scanned %zu MiB of libclient.so code\n",
                  ranges.front().size >> 20);
 
+    plog("patterns: loading config\n");
     const auto& conf = cs2cfg();
+    plog("patterns: config loaded, %zu patterns\n", conf.patterns.size());
     std::vector<Slot> slots;
     slots.reserve(conf.patterns.size());
     for (const auto& pc : conf.patterns) {
