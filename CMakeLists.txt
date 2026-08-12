@@ -11,6 +11,7 @@ option(BUILD_INTERNAL "Build the injected cs2_internal.so (in-game Vulkan ImGui 
 
 add_executable(cs2_cheat
     src/main.cpp
+    src/cfg.cpp
     src/memory.cpp
     src/patterns.cpp
     src/process.cpp

@@ -1,4 +1,5 @@
 #include "game.h"
+#include "cfg.h"
 
 #include "offsets.h"
 #include "process.h"
@@ -49,7 +50,7 @@ void Game::update(Memory& mem) {
     // Fallback: dwLocalPlayerPawn global (best-effort; only used if the
     // controller path is unavailable).
     if (!local_pawn_)
-        local_pawn_ = mem.read<std::uintptr_t>(client_base_ + offsets::dwLocalPlayerPawn)
+        local_pawn_ = mem.read<std::uintptr_t>(client_base_ + cs2cfg().offsets.dwLocalPlayerPawn)
                           .value_or(0);
 
     // --- view matrix / angles ------------------------------------------------
@@ -107,7 +108,7 @@ void Game::read_player(const Memory& mem, std::uintptr_t addr,
     // `); reading it as int32 would pick up the following byte (0x100).
     const auto life = mem.read<std::uint8_t>(addr + off_.m_lifeState);
     const auto team = mem.read<int>(addr + off_.m_iTeamNum);
-    const auto armor = mem.read<int>(addr + offsets::m_ArmorValue);
+    const auto armor = mem.read<int>(addr + cs2cfg().offsets.m_ArmorValue);
     if (!health || !life || !team || !armor) return;
 
     out.health = *health;
@@ -115,13 +116,13 @@ void Game::read_player(const Memory& mem, std::uintptr_t addr,
     out.team = *team;
     out.alive = *life == 0 && *health > 0 && *health <= 100;
     out.scoped = mem.read<bool>(addr + off_.m_bIsScoped).value_or(false);
-    out.flash_alpha = mem.read<float>(addr + offsets::m_flFlashOverlayAlpha).value_or(0.f);
+    out.flash_alpha = mem.read<float>(addr + cs2cfg().offsets.m_flFlashOverlayAlpha).value_or(0.f);
 
     // Feet origin: CGameSceneNode::m_vecOrigin (engine layout, update-proof).
     if (const auto scene = mem.read<std::uintptr_t>(addr + off_.m_pGameSceneNode);
         scene && *scene)
         out.feet = mem.read<Vector3>(*scene + offsets::SCENE_NODE_ORIGIN).value_or({});
-    out.velocity = mem.read<Vector3>(addr + offsets::m_vecVelocity).value_or({});
+    out.velocity = mem.read<Vector3>(addr + cs2cfg().offsets.m_vecVelocity).value_or({});
 
     Vector3 head;
     if (read_bone(mem, addr, offsets::bones::head, head) && head.Length() > 0.001f) {
@@ -158,7 +159,7 @@ void Game::project_radar(const Player& local, Player& p) const {
 
 Vector3 Game::local_eye(const Memory& mem) const {
     if (!local_pawn_) return {};
-    Vector3 off = mem.read<Vector3>(local_pawn_ + offsets::m_vecViewOffset).value_or({});
+    Vector3 off = mem.read<Vector3>(local_pawn_ + cs2cfg().offsets.m_vecViewOffset).value_or({});
     // Sanity guard: the eye offset should be roughly head-height above origin.
     if (off.z < 0.f || off.z > 300.f || std::isnan(off.x) || std::isnan(off.y) ||
         std::isnan(off.z))

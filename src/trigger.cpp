@@ -1,4 +1,5 @@
 #include "trigger.h"
+#include "cfg.h"
 
 #include "config.h"
 #include "offsets.h"
@@ -15,7 +16,7 @@ void Triggerbot::run(Game& game, const Memory& mem, bool enabled) {
     const auto now = std::chrono::steady_clock::now();
     if (now < next_shot_) return;
 
-    const auto idx = mem.read<int>(game.local_pawn() + offsets::m_iIDEntIndex);
+    const auto idx = mem.read<int>(game.local_pawn() + cs2cfg().offsets.m_iIDEntIndex);
     if (!idx || *idx <= 0) return;
 
     const std::uintptr_t ent = game.entity_by_index(mem, *idx);

@@ -1,4 +1,5 @@
 #include "uinput_aim.h"
+#include "cfg.h"
 
 #include <fcntl.h>
 #include <linux/uinput.h>
@@ -29,9 +30,8 @@ bool g_firing = false;
 std::uint64_t g_move_log = 0;
 
 // Game sensitivity: counts per degree = 1 / (sensitivity * 0.022). The 0.022
-// is m_yaw (default). Adjust kSens to match the player's in-game sensitivity.
-constexpr float kSens = 2.5f;
-constexpr float kCountsPerDeg = 1.0f / (kSens * 0.022f);
+// is m_yaw (default). Sensitivity comes from the JSON config.
+float counts_per_deg() { return 1.0f / (cs2cfg().offsets.sensitivity * 0.022f); }
 // Movement: move this fraction of the remaining angle error per frame, capped
 // at kMaxPerFrame counts so far targets snap fast but not instantly.
 constexpr float kFracPerFrame = 0.5f;
@@ -94,7 +94,7 @@ bool init() {
         return false;
     }
     log_("uinput: virtual mouse created (sens %.1f, %.3f counts/deg)\n",
-         kSens, kCountsPerDeg);
+         cs2cfg().offsets.sensitivity, counts_per_deg());
     return true;
 }
 
@@ -108,7 +108,7 @@ void move_to(float target_pitch, float target_yaw) {
     if (!g_input_obj) return;
 
     // Live view angles live in the input object at +0x9C (QAngle pitch,yaw,roll).
-    const auto* va = reinterpret_cast<const float*>(g_input_obj + 0x9C);
+    const auto* va = reinterpret_cast<const float*>(g_input_obj + cs2cfg().offsets.viewAngleOffset);
     const float cur_pitch = va[0];
     const float cur_yaw = va[1];
 
@@ -120,8 +120,9 @@ void move_to(float target_pitch, float target_yaw) {
 
     // Source convention: mouse right (-x) turns right = yaw decreases; mouse
     // down (+y) looks down = pitch increases. Flip signs if inverted.
-    int dx = static_cast<int>(-d_yaw * kFracPerFrame * kCountsPerDeg);
-    int dy = static_cast<int>(d_pitch * kFracPerFrame * kCountsPerDeg);
+    const float cpd = counts_per_deg();
+    int dx = static_cast<int>(-d_yaw * kFracPerFrame * cpd);
+    int dy = static_cast<int>(d_pitch * kFracPerFrame * cpd);
     if (dx > kMaxPerFrame) dx = kMaxPerFrame;
     if (dx < -kMaxPerFrame) dx = -kMaxPerFrame;
     if (dy > kMaxPerFrame) dy = kMaxPerFrame;

@@ -1,4 +1,5 @@
 #include "aimbot.h"
+#include "cfg.h"
 #include "game.h"
 #include "input_x11.h"
 #include "memory.h"
@@ -64,10 +65,10 @@ void data_thread() {
 
     // Input object: the live view angles are mirrored at +0x9C.
     const std::uintptr_t input_obj =
-        mem.read<std::uintptr_t>(game.client_base() + offsets::dwCSGOInput)
+        mem.read<std::uintptr_t>(game.client_base() + cs2cfg().offsets.dwCSGOInput)
             .value_or(0);
     if (input_obj) {
-        game.set_view_angle_source(input_obj + 0x9C);  // real view angles
+        game.set_view_angle_source(input_obj + cs2cfg().offsets.viewAngleOffset);  // real view angles
         uinput_aim::set_input_obj(input_obj);
         // Create the virtual device lazily on first aim (in-match, so it never
         // collides with the game's raw-input init) and keep it alive (no

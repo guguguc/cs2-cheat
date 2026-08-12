@@ -19,20 +19,15 @@
 //      name, crosshair entity index) plus a couple of globals that have no
 //      Osiris pattern. These are best-effort values and only affect cosmetic
 //      features (armor/flash display, player names) or minor aim precision.
+//      NOTE: the RVA offsets (dwCSGOInput, view-angle mirror, schema fields,
+//      sensitivity) now live in config/cs2_config.json and are loaded at
+//      runtime via cs2cfg() - update the JSON, not this file.
 // ============================================================================
 namespace offsets {
 
-// ---- globals without an Osiris pattern (best-effort, from a local dump) -----
-inline constexpr std::uintptr_t dwViewAngles = 0x45773E0;     // QAngle (write-to for aim)
-inline constexpr std::uintptr_t dwLocalPlayerPawn = 0x4802768; // C_CSPlayerPawn* (fallback only)
-inline constexpr std::uintptr_t dwCSGOInput = 0x4576E98;
-
-// ---- auxiliary schema fields (best-effort; cosmetic / minor features) -------
-inline constexpr std::uintptr_t m_ArmorValue = 0x2B34;          // armor display
-inline constexpr std::uintptr_t m_iIDEntIndex = 0x42C4;         // triggerbot crosshair entity
-inline constexpr std::uintptr_t m_vecVelocity = 0x5A0;          // radar velocity
-inline constexpr std::uintptr_t m_vecViewOffset = 0xDF8;        // eye offset (aim precision)
-inline constexpr std::uintptr_t m_flFlashOverlayAlpha = 0x13A4; // flash indicator
+// Stale write/read fallback for the camera angles (not used by the aim path;
+// the live angles come from the input object mirror via cs2cfg()).
+inline constexpr std::uintptr_t dwViewAngles = 0x45773E0;
 
 // ---- engine struct layouts (hardcoded, like Osiris does) --------------------
 // CEntityIdentity (sizeof == 0x70, verified by Osiris' static_assert)

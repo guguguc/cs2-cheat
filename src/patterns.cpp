@@ -1,5 +1,6 @@
 #include "patterns.h"
 
+#include "cfg.h"
 #include "memory.h"
 #include "process.h"
 
@@ -116,52 +117,6 @@ namespace patterns {
 
 namespace {
 
-constexpr Pattern kPatterns[] = {
-    // ---- entity system -----------------------------------------------------
-    // EntitySystemPointer (mov [rip+disp32], rbx) -> CGameEntitySystem** slot
-    {"4C 63 ? ? ? ? ? 48 89 1D ? ? ? ?", 10, Op::Abs4},
-    // EntityListOffset (lea r13, [rdi+disp8]) -> entity system + off = list
-    {"4C 8D 6F ? 41 54 53 48 89 FB 48 83 EC ? 48 89 07 48", 3, Op::Read, 1},
-    // ---- C_BaseEntity ------------------------------------------------------
-    // m_pGameSceneNode (mov rax, [rbp+disp32])
-    {"2C E0 49 8B 85 ? ? ? ?", 5, Op::Read},
-    // m_iHealth (mov dword ptr [rdi+disp32], 0)
-    {"C7 87 ? ? ? ? 00 00 00 00 48 8D 35", 2, Op::Read},
-    // m_lifeState (movzx edx, byte ptr [rdi+disp32])
-    {"0F B6 97 ? ? ? ? 39 F2", 3, Op::Read},
-    // m_iTeamNum (cmp byte ptr [rdi+disp32], 2)
-    {"? ? ? ? 02 48 8D 05 ? ? ? ? 74 ? 48", 0, Op::Read},
-    // ---- CCSPlayerController ------------------------------------------------
-    // m_hPawn (mov edi, [rdi+disp32])
-    {"84 C0 75 ? 8B 8F ? ? ? ?", 6, Op::Read},
-    // ---- C_CSPlayerPawn -----------------------------------------------------
-    // m_pWeaponServices (mov rdi, [rsi+disp32])
-    {"48 8B BE ? ? ? ? 48 8D 35 ? ? ? ? E8 ? ? ? ? 48 89 C2", 3, Op::Read},
-    // m_bIsScoped (mov ebx, disp32)
-    {"BB ? ? ? ? 00 F3 0F 11 45 ? 0F", 1, Op::Read},
-    // ---- client globals -----------------------------------------------------
-    // dwLocalPlayerController (cmp qword ptr [rip+disp32], 0)
-    {"48 83 3D ? ? ? ? ? 0F 95 C0 C3", 3, Op::Abs5},
-    // dwGlobalVars (mov [rip+disp32], rsi)
-    {"8D ? ? ? ? ? 48 89 35 ? ? ? ? 48 89 ? ? C3", 9, Op::Abs4},
-    // dwViewMatrix (lea r8, [rip+disp32])
-    {"01 4C 8D 05 ? ? ? ? 4C 89 EE", 4, Op::Abs4},
-    // dwViewRender (lea rax, [rip+disp32])
-    {"48 8D 05 ? ? ? ? 48 89 38 48 85", 3, Op::Abs4},
-};
-
-constexpr int kRequired[] = {
-    0,  // gameEntitySystem
-    1,  // entityListOffset
-    2,  // m_pGameSceneNode
-    3,  // m_iHealth
-    4,  // m_lifeState
-    5,  // m_iTeamNum
-    6,  // m_hPawn
-    9,  // localPlayerController
-    11, // viewMatrix
-};
-
 struct Slot {
     Pattern pat;
     std::uintptr_t value = 0;  // abs address (Abs) or offset (Read)
@@ -189,67 +144,81 @@ bool resolve(int pid, Resolved& out) {
     std::fprintf(stderr, "patterns: scanned %zu MiB of libclient.so code\n",
                  ranges.front().size >> 20);
 
-    Slot slots[sizeof(kPatterns) / sizeof(kPatterns[0])];
-    for (std::size_t i = 0; i < sizeof(kPatterns) / sizeof(kPatterns[0]); ++i) {
-        slots[i].pat = kPatterns[i];
-        const auto bytes = parse_pattern(kPatterns[i].hex);
-        const auto hits = find_all(text, ranges.front().start, bytes);
-        slots[i].scan.found = !hits.empty();
-        slots[i].scan.occurrences = static_cast<int>(hits.size());
-        slots[i].scan.match = hits.empty() ? 0 : hits.front();
+    const auto& conf = cs2cfg();
+    std::vector<Slot> slots;
+    slots.reserve(conf.patterns.size());
+    for (const auto& pc : conf.patterns) {
+        Slot s;
+        s.pat.hex = pc.pattern.c_str();
+        s.pat.add = pc.off;
+        s.pat.op = pc.op == "read"   ? Op::Read
+                   : pc.op == "abs4" ? Op::Abs4
+                   : pc.op == "abs5" ? Op::Abs5
+                                     : Op::None;
+        s.pat.read_size = pc.size;
 
-        if (slots[i].scan.found) {
-            const std::uintptr_t match = slots[i].scan.match;
-            switch (kPatterns[i].op) {
+        const auto bytes = parse_pattern(s.pat.hex);
+        const auto hits = find_all(text, ranges.front().start, bytes);
+        s.scan.found = !hits.empty();
+        s.scan.occurrences = static_cast<int>(hits.size());
+        s.scan.match = hits.empty() ? 0 : hits.front();
+
+        if (s.scan.found) {
+            const std::uintptr_t match = s.scan.match;
+            switch (s.pat.op) {
             case Op::Read: {
-                if (kPatterns[i].read_size == 1) {
-                    if (const auto v = read_at<std::int8_t>(mem, match + kPatterns[i].add))
-                        slots[i].value = static_cast<std::uintptr_t>(*v);
+                if (s.pat.read_size == 1) {
+                    if (const auto v = read_at<std::int8_t>(mem, match + s.pat.add))
+                        s.value = static_cast<std::uintptr_t>(*v);
                 } else {
-                    if (const auto v = read_at<std::int32_t>(mem, match + kPatterns[i].add))
-                        slots[i].value = static_cast<std::uintptr_t>(*v);
+                    if (const auto v = read_at<std::int32_t>(mem, match + s.pat.add))
+                        s.value = static_cast<std::uintptr_t>(*v);
                 }
-                slots[i].is_offset = true;
+                s.is_offset = true;
                 break;
             }
             case Op::Abs4:
             case Op::Abs5: {
-                const auto disp = read_at<std::int32_t>(mem, match + kPatterns[i].add);
+                const auto disp = read_at<std::int32_t>(mem, match + s.pat.add);
                 if (disp)
-                    slots[i].value = match + kPatterns[i].add +
-                                     (kPatterns[i].op == Op::Abs4 ? 4 : 5) +
-                                     static_cast<std::uintptr_t>(*disp);
+                    s.value = match + s.pat.add +
+                              (s.pat.op == Op::Abs4 ? 4 : 5) +
+                              static_cast<std::uintptr_t>(*disp);
                 break;
             }
             case Op::None:
-                slots[i].value = match + kPatterns[i].add;
+                s.value = match + s.pat.add;
                 break;
             }
         }
+        slots.push_back(std::move(s));
     }
 
-    out.gameEntitySystem = slots[0].value;
-    out.entityListOffset = static_cast<int>(slots[1].value);
-    out.m_pGameSceneNode = static_cast<int>(slots[2].value);
-    out.m_iHealth = static_cast<int>(slots[3].value);
-    out.m_lifeState = static_cast<int>(slots[4].value);
-    out.m_iTeamNum = static_cast<int>(slots[5].value);
-    out.m_hPawn = static_cast<int>(slots[6].value);
-    out.m_pWeaponServices = static_cast<int>(slots[7].value);
-    out.m_bIsScoped = static_cast<int>(slots[8].value);
-    out.localPlayerController = slots[9].value;
-    out.globalVars = slots[10].value;
-    out.viewMatrix = slots[11].value;
-    out.viewRender = slots[12].value;
+    auto get = [&](const char* name) -> std::uintptr_t {
+        for (std::size_t i = 0; i < conf.patterns.size(); ++i)
+            if (conf.patterns[i].name == name) return slots[i].value;
+        return 0;
+    };
+    out.gameEntitySystem = get("gameEntitySystem");
+    out.entityListOffset = static_cast<int>(get("entityListOffset"));
+    out.m_pGameSceneNode = static_cast<int>(get("m_pGameSceneNode"));
+    out.m_iHealth = static_cast<int>(get("m_iHealth"));
+    out.m_lifeState = static_cast<int>(get("m_lifeState"));
+    out.m_iTeamNum = static_cast<int>(get("m_iTeamNum"));
+    out.m_hPawn = static_cast<int>(get("m_hPawn"));
+    out.m_pWeaponServices = static_cast<int>(get("m_pWeaponServices"));
+    out.m_bIsScoped = static_cast<int>(get("m_bIsScoped"));
+    out.localPlayerController = get("localPlayerController");
+    out.globalVars = get("globalVars");
+    out.viewMatrix = get("viewMatrix");
+    out.viewRender = get("viewRender");
 
     out.ok = true;
-    for (const int idx : kRequired) {
-        if (!slots[idx].scan.found) {
-            std::fprintf(stderr, "patterns: MISSING pattern #%d: %s\n", idx, kPatterns[idx].hex);
+    for (const auto& name : conf.required) {
+        const std::uintptr_t v = get(name.c_str());
+        if (v == 0) {
+            std::fprintf(stderr, "patterns: MISSING pattern: %s\n", name.c_str());
             out.ok = false;
-        } else if (slots[idx].scan.occurrences > 1) {
-            std::fprintf(stderr, "patterns: pattern #%d matched %d times: %s\n", idx,
-                         slots[idx].scan.occurrences, kPatterns[idx].hex);
         }
     }
 

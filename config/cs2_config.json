@@ -1,0 +1,105 @@
+{
+  "patterns": [
+    {
+      "name": "gameEntitySystem",
+      "pattern": "4C 63 ?? ?? ?? ?? 48 89 1D ?? ?? ?? ??",
+      "off": 10,
+      "op": "abs4"
+    },
+    {
+      "name": "entityListOffset",
+      "pattern": "4C 8D 6F ?? 41 54 53 48 89 FB 48 83 EC ?? 48 89 07 48",
+      "off": 3,
+      "op": "read",
+      "size": 1
+    },
+    {
+      "name": "m_pGameSceneNode",
+      "pattern": "2C E0 49 8B 85 ?? ?? ?? ??",
+      "off": 5,
+      "op": "read"
+    },
+    {
+      "name": "m_iHealth",
+      "pattern": "C7 87 ?? ?? ?? ?? 00 00 00 00 48 8D 35",
+      "off": 2,
+      "op": "read"
+    },
+    {
+      "name": "m_lifeState",
+      "pattern": "0F B6 97 ?? ?? ?? ?? 39 F2",
+      "off": 3,
+      "op": "read"
+    },
+    {
+      "name": "m_iTeamNum",
+      "pattern": "?? ?? ?? ?? 02 48 8D 05 ?? ?? ?? ?? 74 ?? 48",
+      "off": 0,
+      "op": "read"
+    },
+    {
+      "name": "m_hPawn",
+      "pattern": "84 C0 75 ?? 8B 8F ?? ?? ?? ??",
+      "off": 6,
+      "op": "read"
+    },
+    {
+      "name": "m_pWeaponServices",
+      "pattern": "48 8B BE ?? ?? ?? ?? 48 8D 35 ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 89 C2",
+      "off": 3,
+      "op": "read"
+    },
+    {
+      "name": "m_bIsScoped",
+      "pattern": "BB ?? ?? ?? ?? 00 F3 0F 11 45 ?? 0F",
+      "off": 1,
+      "op": "read"
+    },
+    {
+      "name": "localPlayerController",
+      "pattern": "48 83 3D ?? ?? ?? ?? ?? 0F 95 C0 C3",
+      "off": 3,
+      "op": "abs5"
+    },
+    {
+      "name": "globalVars",
+      "pattern": "8D ?? ?? ?? ?? 48 89 35 ?? ?? ?? ?? 48 89 ?? ?? C3",
+      "off": 9,
+      "op": "abs4"
+    },
+    {
+      "name": "viewMatrix",
+      "pattern": "01 4C 8D 05 ?? ?? ?? ?? 4C 89 EE",
+      "off": 4,
+      "op": "abs4"
+    },
+    {
+      "name": "viewRender",
+      "pattern": "48 8D 05 ?? ?? ?? ?? 48 89 38 48 85",
+      "off": 3,
+      "op": "abs4"
+    }
+  ],
+  "required": [
+    "gameEntitySystem",
+    "entityListOffset",
+    "m_pGameSceneNode",
+    "m_iHealth",
+    "m_lifeState",
+    "m_iTeamNum",
+    "m_hPawn",
+    "localPlayerController",
+    "viewMatrix"
+  ],
+  "offsets": {
+    "dwCSGOInput": "0x4576E98",
+    "viewAngleOffset": "0x9C",
+    "m_vecViewOffset": "0xDF8",
+    "m_ArmorValue": "0x2B34",
+    "m_iIDEntIndex": "0x42C4",
+    "m_vecVelocity": "0x5A0",
+    "m_flFlashOverlayAlpha": "0x13A4",
+    "dwLocalPlayerPawn": "0x4802768",
+    "sensitivity": 2.5
+  }
+}
