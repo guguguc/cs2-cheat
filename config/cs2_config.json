@@ -92,7 +92,7 @@
     "viewMatrix"
   ],
   "offsets": {
-    "dwCSGOInput": "0x4576E98",
+    "dwCSGOInput": "0x4576F18",
     "viewAngleOffset": "0x9C",
     "m_vecViewOffset": "0xDF8",
     "m_ArmorValue": "0x2B34",
@@ -113,7 +113,7 @@
     "boneNeckIndex": 6,
     "m_vecVelocity": "0x5A0",
     "m_flFlashOverlayAlpha": "0x13A4",
-    "dwLocalPlayerPawn": "0x4802768",
+    "dwLocalPlayerPawn": "0x48027E8",
     "sensitivity": 2.5
   }
 }
