@@ -76,6 +76,39 @@ std::uintptr_t find_sensitivity_convar(const Memory& mem) {
     return 0;
 }
 
+// deadlocked check_bvh equivalent: every 200 ms, if the map name (read from
+// global_vars+0x198, same as deadlocked current_map()) changed, reload the
+// BVH. Reload only happens after entering a match; retries automatically
+// until read_map succeeds (failed loads do not remember the map name).
+std::string read_cstr(const Memory& mem, std::uintptr_t addr) {
+    if (!addr) return {};
+    char buf[128] = {0};
+    mem.read(addr, buf, sizeof(buf) - 1);
+    return std::string(buf);
+}
+
+std::uintptr_t s_bvh_world = 0;
+
+void check_bvh(const Memory& mem, const patterns::Resolved& off) {
+    static std::string last_map;
+    static auto last_check = std::chrono::steady_clock::now();
+    if (std::chrono::steady_clock::now() - last_check < std::chrono::milliseconds(200)) return;
+    last_check = std::chrono::steady_clock::now();
+    if (!off.globalVars || !off.vphysWorld) return;
+    const auto gv = mem.read<std::uintptr_t>(off.globalVars).value_or(0);
+    if (!gv) return;
+    const auto name_ptr = mem.read<std::uintptr_t>(gv + 0x198).value_or(0);
+    const std::string map = read_cstr(mem, name_ptr);
+    if (map == last_map) return;
+    last_map = map;
+    if (aimbot_init_bvh(mem, off.vphysWorld)) {
+        // loaded ok
+    } else {
+        last_map.clear();  // failed: retry next 200 ms cycle
+    }
+    (void)s_bvh_world;
+}
+
 void data_thread() {
     log_("data_thread: start\n");
     Memory mem;
@@ -133,28 +166,34 @@ void data_thread() {
         }
 
         uinput_aim::set_local_pawn(game.local_pawn());
+        check_bvh(mem, off);  // deadlocked-style: 200 ms, map-change triggered
 
         bool aim = false, trig = false;
         float fov = 12.f, sm = 6.f;
         {
             std::lock_guard<std::mutex> lk(g_ctx.mtx);
-            aim = g_ctx.aim_on && g_ctx.aim_hold;
+            aim = g_ctx.aim_on;  // menu checkbox and X key are kept in sync
             trig = g_ctx.trigger_on;
             fov = g_ctx.aim_fov;
             sm = g_ctx.aim_smooth;
         }
         const bool steered = run_aimbot(game, mem, aim, fov, sm);
+        {
+            std::lock_guard<std::mutex> lk(g_ctx.mtx);
+            g_ctx.aim_active = steered;  // screen hint: aiming right now
+        }
+        bool fire_now = false;
 
         if (steered)
             log_("aimbot: steered (aim=%d)\n", aim ? 1 : 0);
         static bool last_aim = false;
         if (aim != last_aim) {
             last_aim = aim;
-            log_("aim: %s (aim_on=%d aim_hold=%d)\n", aim ? "ACTIVE" : "off",
-                 g_ctx.aim_on ? 1 : 0, g_ctx.aim_hold ? 1 : 0);
+            log_("aim: %s (aim_on=%d aim_toggle=%d)\n", aim ? "ACTIVE" : "off",
+                 g_ctx.aim_on ? 1 : 0, g_ctx.aim_toggle ? 1 : 0);
         }
-        if (!steered || g_ctx.panel_open) uinput_aim::set_fire(false);
-        trigger.run(game, mem, trig);
+        trigger.run(game, mem, trig, fire_now);  // schedule (delayed shot)
+        trigger.run_shoot();                      // drive the button
 
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }

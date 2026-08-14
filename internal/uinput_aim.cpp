@@ -160,9 +160,7 @@ void move_to(float target_pitch, float target_yaw) {
         log_("uinput: steer #%llu dx=%d dy=%d\n",
              static_cast<unsigned long long>(g_move_log), dx, dy);
     move_counts(dx, dy);
-
-    // Auto-fire when locked onto the target.
-    set_fire(err < kLockDeg);
+    // Aiming only: the triggerbot owns firing (deadlocked separates them).
 }
 
 void set_fire(bool on) {

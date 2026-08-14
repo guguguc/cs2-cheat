@@ -20,10 +20,15 @@ inline constexpr double AIM_SMOOTH         = 6.0;     // 1.0 = instant snap
 inline constexpr double AIM_MAX_DISTANCE_M = 200.0;
 inline constexpr int    AIM_BONE           = 6;       // head
 
-// ---- triggerbot -------------------------------------------------------------
+// ---- triggerbot (deadlocked semantics) -------------------------------------
 inline constexpr bool   TRIGGER_ENABLED_DEFAULT = false;
-inline constexpr int    TRIGGER_DELAY_MS        = 45;  // min time between shots
-inline constexpr const char* TRIGGER_BUTTON     = "0xC0";  // ydotool left click
+inline constexpr int    TRIGGER_DELAY_MS_MIN    = 30;   // random shot delay range
+inline constexpr int    TRIGGER_DELAY_MS_MAX    = 80;
+inline constexpr int    TRIGGER_SHOT_DURATION_MS = 80;  // button hold time
+inline constexpr float  TRIGGER_VELOCITY_THRESHOLD = 100.0f;  // moving too fast = no fire
+inline constexpr bool   TRIGGER_HEAD_ONLY       = true;  // crosshair must be on head
+inline constexpr bool   TRIGGER_FLASH_CHECK     = true;  // no fire while flashed
+inline constexpr bool   TRIGGER_SCOPE_CHECK     = true;  // snipers must be scoped
 
 // ---- frame pacing -----------------------------------------------------------
 inline constexpr int FRAME_INTERVAL_MS = 16;  // ~60 fps

@@ -90,14 +90,42 @@ void esp(SharedCtx& ctx, const ImVec2& display) {
     }
 }
 
+void aim_hint(SharedCtx& ctx, const ImVec2& display) {
+    if (!ctx.aim_active || ctx.panel_open) return;
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    const char* text = "AIMBOT ON";
+    // Big transparent text, centered just below the crosshair.
+    ImFont* font = ImGui::GetIO().Fonts->Fonts.empty()
+                       ? nullptr
+                       : ImGui::GetIO().Fonts->Fonts.back();
+    const float size_px = 30.f;  // big, readable at a glance
+    const ImVec2 size = font ? font->CalcTextSizeA(size_px, FLT_MAX, 0.f, text)
+                             : ImGui::CalcTextSize(text);
+    const ImVec2 pos{display.x * 0.5f - size.x * 0.5f,
+                     display.y * 0.5f + 46.f};
+    if (font)
+        dl->AddText(font, size_px, pos, IM_COL32(0, 255, 120, 255), text);
+    else
+        dl->AddText(pos, IM_COL32(0, 255, 120, 255), text);  // no backdrop
+    (void)FLT_MAX;
+}
+
 void panel(SharedCtx& ctx) {
     if (!ctx.panel_open) return;
     ImGui::SetNextWindowPos({12.f, 12.f}, ImGuiCond_FirstUseEver);
     ImGui::Begin("cs2-internal", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
 
     ImGui::Checkbox("ESP", &ctx.esp_on);
-    ImGui::Checkbox("Aimbot", &ctx.aim_on);
+    {
+        const bool prev = ctx.aim_on;
+        ImGui::Checkbox("Aimbot", &ctx.aim_on);
+        if (ctx.aim_on != prev) ctx.aim_toggle = ctx.aim_on;  // menu syncs hotkey state
+    }
+    if (ctx.aim_on)
+        ImGui::Checkbox("Visibility check", &ctx.visibility_check);
     ImGui::Checkbox("Triggerbot", &ctx.trigger_on);
+    if (ctx.trigger_on)
+        ImGui::Checkbox("Head only", &ctx.trigger_head_only);
 
     ImGui::Separator();
     ImGui::SliderFloat("FOV (deg)", &ctx.aim_fov, 1.f, 60.f, "%.1f");

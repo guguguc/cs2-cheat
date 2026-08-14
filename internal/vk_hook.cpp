@@ -474,6 +474,7 @@ void render_frame(VkQueue queue, std::uint32_t image_index) {
         std::lock_guard<std::mutex> lk(g_ctx.mtx);
         overlay_draw::esp(g_ctx, io.DisplaySize);
         overlay_draw::panel(g_ctx);
+        overlay_draw::aim_hint(g_ctx, io.DisplaySize);
     }
     ImGui::Render();
     fp_QueueWaitIdle(queue);

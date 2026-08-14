@@ -157,21 +157,22 @@ void poll(ImGuiIO& io) {
         }
     }
 
-    // Authoritative aim-key state: XQueryKeymap reflects the physical key
-    // every frame, so a lost KeyRelease can never leave the aimbot stuck on.
+
+    // X key: edge-triggered toggle for the aimbot (independent of the menu
+    // checkbox - either one activates aiming).
     char keys[32] = {0};
     if (key_aim)
         XQueryKeymap(dpy, keys);
     const bool key_down =
         key_aim != 0 && ((keys[key_aim >> 3] >> (key_aim & 7)) & 1) != 0;
-    // Debounce: only activate after the key is seen down for 2 consecutive
-    // polls, so a release-frame flicker never makes the aimbot fire a jump.
-    static int aim_down_frames = 0;
-    if (key_down)
-        ++aim_down_frames;
-    else
-        aim_down_frames = 0;
-    g_ctx.aim_hold = aim_down_frames >= 2;
+    static bool prev_key_down = false;
+    if (key_down && !prev_key_down) {
+        // X toggles BOTH the menu checkbox and the hotkey state so they stay
+        // in sync: on = on everywhere, off = off everywhere.
+        g_ctx.aim_on = !g_ctx.aim_on;
+        g_ctx.aim_toggle = g_ctx.aim_on;
+    }
+    prev_key_down = key_down;
 
     // Pointer position + buttons.
     Window r1 = 0, r2 = 0;
