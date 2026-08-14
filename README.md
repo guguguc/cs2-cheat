@@ -1,10 +1,11 @@
 # cs2-cheat
 
-External ESP / aim assist for **Counter-Strike 2, native Linux build**.
-No DLL injection, no drivers: it reads the game's memory from userspace with
-`process_vm_readv` / `process_vm_writev` and module bases from `/proc/<pid>/maps`,
-then renders ESP through an **ImGui overlay** or a **terminal radar**, and aims
-by writing view angles.
+Injected ESP / aim assist for **Counter-Strike 2, native Linux build**.
+A shared object (`libcs2_internal.so`) is injected into the running game; it
+hooks the Vulkan loader and draws the ImGui ESP directly into the game's
+swapchain image (no second window), reads the game's memory from userspace,
+and aims through a **uinput virtual mouse** (so view-angle writes are not
+needed and recoil compensation works like a real mouse).
 
 > Research / education project. Using this against Valve's official servers
 > violates the CS2 terms of service and will get you **VAC banned**. Use it on
@@ -14,198 +15,170 @@ by writing view angles.
 
 | Feature | Implementation |
 |---|---|
-| ESP (box, health bar, distance) | ImGui overlay (GLFW + OpenGL3) or ANSI terminal radar |
-| Aimbot (FOV-limited, smoothed) | writes `dwViewAngles` via `process_vm_writev` |
-| Triggerbot | fires through `ydotool` (uinput) when the crosshair is on an enemy |
-| Entity reading | CS2 `CEntityList` → `CEntityIdentity` bucket traversal, bones via `CSkeletonInstance` |
-| No injection | purely external; nothing is loaded into the game process |
+| ESP: box + health + skeleton | ImGui drawn into the game's Vulkan swapchain (`internal/vk_hook.cpp` + `internal/overlay_draw.cpp`) |
+| Aimbot (FOV-limited, smoothed, inertia) | uinput virtual mouse (TI-84 disguise), deadlocked-style recoil compensation, auto-fire on lock |
+| Triggerbot | optional, same uinput device |
+| Offset resolution | Osiris-style pattern scans on the live binary + JSON config (`config/cs2_config.json`) |
+| Unload | remote `unload_self` + `injector`-based unloader tool (restores hooks, releases X11 grabs) |
 
 ## Build
 
-Requirements: a C++20 compiler, CMake ≥ 3.16. The ImGui overlay additionally
-needs GLFW3 and OpenGL development packages (ImGui itself is vendored in
-`third_party/imgui`, MIT license).
+Requirements: a C++20 compiler, CMake ≥ 3.16, Vulkan and X11 dev packages
+(ImGui is vendored in `third_party/imgui`, MIT license).
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-To build without the overlay (terminal radar only):
+Produces `build/libcs2_internal.so` plus selftests
+(`./build/vk_hook_selftest`, `./build/hook64_test`, `./build/scan_test`).
+
+## Inject & run
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DUSE_IMGUI=OFF
+# your favourite SO injector, e.g. the kubo/injector-based one in this repo:
+./injector -n cs2 libcs2_internal.so
 ```
 
-## Run
+On load the library:
+
+1. spawns a data thread that pattern-scans the live binary and resolves
+   offsets (paths/config in `config/cs2_config.json`, `CS2_CONFIG` env
+   overrides the path),
+2. inline-hooks `vkCreateInstance` / `vkCreateDevice` /
+   `vkCreateSwapchainKHR` / `vkQueuePresentKHR` in `libvulkan.so.1`,
+3. initializes the ImGui overlay on the next swapchain (re)creation,
+4. opens an X11 connection to find the game window (`_NET_WM_PID`, recursive
+   tree walk — required on GNOME/Mutter which reparents X11 windows),
+5. lazily creates the uinput virtual mouse on first aim (kept alive).
+
+Controls:
+
+- `F1` (or `p`) — toggle the menu panel
+- hold `x` — aimbot (key grabbed globally via XGrabKey)
+- menu toggles ESP / aimbot / triggerbot, FOV, smooth, etc.
+
+Progress/errors go to `/tmp/cs2_internal.log`. X11 grab diagnostics go to
+`/tmp/cs2_x11_diag.log`.
+
+### Unload (so you can re-inject)
 
 ```sh
-# normal: attaches to cs2 automatically when it starts
-./build/cs2_cheat
-
-# no game needed: synthetic feed to see the radar / overlay rendering
-./build/cs2_cheat --demo
-
-# ImGui overlay (requires a GL-capable display)
-./build/cs2_cheat --overlay
-./build/cs2_cheat --overlay --overlay-platform x11    # force X11 backend
-./build/cs2_cheat --overlay --overlay-platform wayland # force Wayland backend
+./unload -n cs2          # dlclose twice (unloader's ref + the inject run's leaked ref)
 ```
 
-Terminal keys: `e` ESP · `a` aimbot · `t` triggerbot · `q` quit.
-Overlay: `p` toggles the control panel / click-through mode (X11).
+`unload_self` (exported by the SO) stops the data thread (waits for it),
+restores the hooked bytes, destroys the uinput device and releases the X11
+grabs, so the library can be dlclosed without crashing the game. After
+re-injecting, recreate the swapchain once (toggle fullscreen / resize / join
+a match) for the overlay to initialize.
 
-### Reading the game's memory
+## Config & offsets
 
-`process_vm_readv` is subject to Yama `ptrace_scope`. The tool prints a warning
-and a fix if it is restricted; you can also run it as root:
+CS2 offsets change on almost every update. Offsets and scan patterns live in
+`config/cs2_config.json`:
 
-```sh
-sudo sysctl kernel.yama.ptrace_scope=0
+```json
+{ "patterns": [...], "required": [...], "offsets": { "dwCSGOInput": "0x4576F18", ... } }
 ```
 
-### Wayland reality check
-
-- The **memory, aimbot and triggerbot parts are compositor-independent** and
-  work on Wayland exactly as on X11.
-- The **terminal radar works everywhere** (any terminal emulator).
-- The **ImGui overlay** uses GLFW. On **X11 / XWayland** it can be
-  always-on-top and click-through (XShape). On **native Wayland** GLFW creates
-  an ordinary window: it cannot force itself above the game and cannot be
-  click-through (Wayland does not allow unprivileged overlays). Practical
-  options on Wayland:
-  - use the terminal radar as the ESP, or
-  - run the game with `SDL_VIDEODRIVER=x11` (XWayland) and start the overlay
-    with `--overlay-platform x11`.
-
-### Triggerbot
-
-Requires the `ydotool` daemon (uinput access), which is the standard Wayland
-input-synthesis path:
-
-```sh
-sudo systemctl enable --now ydotool     # or run ydotoold manually
-```
-
-The button code lives in `src/config.h` (`TRIGGER_BUTTON`, default `0xC0` =
-left click). The bot only fires when the entity under the crosshair
-(`m_iIDEntIndex`) is an alive enemy.
-
-## Keeping offsets fresh
-
-CS2 offsets change on almost every update. This repo ships offsets seeded from
-the published linux dump (`2026-07-09`; the game updated `2026-08-07`), so
-**refresh them before each play session**.
-
-### Option A: published dumps
-
-```sh
-python3 scripts/update_offsets.py
-```
-
-Downloads `offsets.json` + `libclient.so.json` from the
-[a2x/cs2-dumper](https://github.com/a2x/cs2-dumper) `linux` branch and rewrites
-`src/offsets.h`.
-
-### Option B: dump your own build (recommended — always exact)
-
-The dumper reads the *running* game, so it always matches your installed build:
+`src/patterns.cpp` scans the running game for the byte patterns; named offsets
+(dwCSGOInput, viewAngleOffset, bone layout, aim punch, ...) are read from the
+`offsets` section. Refresh with the published linux dump:
 
 ```sh
 git clone -b linux https://github.com/a2x/cs2-dumper.git
 cd cs2-dumper && cargo build --release
 # start CS2, then:
 ./target/release/cs2-dumper                 # writes ./output/*
-cd ..
-python3 scripts/update_offsets.py --local cs2-dumper/output
 ```
 
-The script prints the dump timestamp and warns when it is older than a week.
+then copy the relevant values into `config/cs2_config.json` (or run
+`scripts/dump_local.sh` for a local dump helper).
 
 ## How it works
 
 ```
-cs2 process (libclient.so mapped)
-   │  process_vm_readv / writev (no ptrace attach)
-   ▼
-Memory ──► Game: local pawn, view matrix/angles, CEntityList traversal
-   │              (64 slots → CEntityIdentity buckets → pawns)
-   │              bones: pawn → CGameSceneNode → CSkeletonInstance.m_modelState
-   ▼
-Snapshot ──► RadarRenderer (terminal)     ──► ImGui overlay (GLFW/GL3)
-   │
-   ├──► Aimbot: CalcAngle(head) → FOV filter → smooth → write dwViewAngles
-   └──► Triggerbot: m_iIDEntIndex → enemy check → ydotool click
+cs2 process
+   │  injected libcs2_internal.so
+   ├── data thread ──► patterns::resolve (live pattern scan)
+   │                    Memory reads (process_vm_readv, no ptrace attach)
+   │                    Game: local pawn, view matrix/angles, CEntityList
+   │                    bones: pawn → CGameSceneNode → CSkeletonInstance
+   │                    aimbot: CalcAngle(head) → FOV → inertia → uinput move
+   └── vk_hook ──► detour_present → ImGui (ESP + panel) into swapchain
 ```
 
 Key files:
 
 | File | Purpose |
 |---|---|
-| `src/offsets.h` | all offsets; auto-regenerated by the script |
-| `src/process.cpp` | `/proc` scanning, module base from maps, ptrace scope |
-| `src/memory.cpp` | `process_vm_readv` / `writev` wrappers |
-| `src/game.cpp` | entity list, player/bone reads, radar projection, snapshot |
-| `src/aimbot.cpp` | FOV-limited smoothed aim via view-angle writes |
-| `src/trigger.cpp` | ydotool-based triggerbot |
-| `src/radar.cpp` | ANSI radar + sorted player list (works everywhere) |
-| `src/overlay_imgui.cpp` | ImGui ESP + control panel (GLFW/OpenGL3) |
-| `src/demo.cpp` | synthetic feed for `--demo` |
-| `scripts/update_offsets.py` | offset refresh (network or `--local`) |
-| `tests/math_test.cpp` | math/w2s sanity checks (`ctest`) |
+| `internal/entry.cpp` | constructor, data thread, unload_self |
+| `internal/vk_hook.cpp` / `hook_x64.h` | Vulkan loader inline hooks + trampolines |
+| `internal/input_x11.cpp` | game-window lookup, key grabs, raw mouse for the menu |
+| `internal/uinput_aim.cpp` | virtual mouse creation + smoothed movement |
+| `internal/overlay_draw.cpp` | ImGui ESP (box/skeleton) + control panel |
+| `src/patterns.cpp` | pattern scanning of the live binary |
+| `src/cfg.cpp` | JSON config loading (loaded once) |
+| `src/aimbot.cpp` / `src/trigger.cpp` | aim/recoil logic, triggerbot |
+| `scripts/check_layout.sh` | layout-stability check vs saved baseline |
+
+## Layout sensitivity (read before editing)
+
+This cheat is **sensitive to .text layout shifts**. A verified experiment:
+adding one never-called dead function shifted every function address and
+reproduced a "mouse breaks after inject" bug; reverting it fixed the mouse.
+Root cause is still under investigation — treat ANY layout shift as a release
+blocker:
+
+```sh
+scripts/check_layout.sh --save   # after verifying a good build
+scripts/check_layout.sh          # after each build; fails if layout moved
+```
+
+Known triggers:
+
+- `constexpr float k = 1.0f` lets the compiler fold `x*1.0` away, shrinking
+  `move_to()` and shifting every subsequent function — keep
+  `kFracPerFrame = 0.5f` (or move the constant to another TU with external
+  linkage and verify with the script).
+- Any added/removed function changes addresses; run the script after changes.
+
+## Compositor / desktop notes
+
+| Desktop | Status |
+|---|---|
+| GNOME (Wayland) | ✅ F1, ESP, aimbot, mouse all work (recursive window lookup required; Mutter reparents X11 windows) |
+| Hyprland | ⚠️ menu/ESP work in lobby; in a match with raw input the mouse may not move (investigating) |
+| X11 | should work (untested recently) |
+
+The game runs as an XWayland client (`SDL_VIDEO_DRIVER=x11`); global key
+grabs and pointer tracking go through the X server, so compositor
+differences matter.
 
 ## FAQ
 
-- **Why external?** No injection, no hooks, no kernel objects. The whole cheat
-  is a normal userspace process, so it is easier to audit and to keep working
-  across game updates (only offsets change).
 - **Does it bypass VAC?** No. Nothing here evades anti-cheat; this project is
   for learning and private research. VAC and VAC Live detect known cheat
-  signatures and memory-access patterns.
-- **Will it work on the Windows build under Proton?** No — the offsets and
-  module names here target the native Linux build (`libclient.so`). The reader
-  itself would work on Wine processes too, but you would need Windows offsets.
-- **Why is the aim so smooth / not hitting?** Tune FOV, smoothing and max
-  distance in the overlay panel or `src/config.h`; refresh offsets after every
-  game update.
-
-## In-game rendering (`cs2_internal.so`)
-
-The external overlay opens its own window, which on Wayland compositors cannot
-always sit above the game. For true in-game rendering there is an injected
-shared object: it hooks the Vulkan loader's `vkQueuePresentKHR` inside the game
-process and draws the ImGui ESP directly into the game's swapchain image — no
-second window at all.
-
-Build:
-
-```sh
-cmake --build build -j          # produces build/libcs2_internal.so
-```
-
-Inject `build/libcs2_internal.so` into the running `cs2` process with your
-favourite SO injector. On load it:
-
-1. resolves offsets from the live binary (`src/patterns.cpp`, Osiris-style),
-2. spawns a data thread that feeds `Game::update()` + aimbot,
-3. inline-hooks `vkCreateInstance` / `vkCreateDevice` /
-   `vkCreateSwapchainKHR` / `vkQueuePresentKHR` in `libvulkan.so.1`
-   (`internal/vk_hook.cpp`, x86-64 trampolines in `internal/hook_x64.h`),
-4. renders ESP boxes + panel into the presented image (load-op LOAD keeps the
-   game frame; `vkQueueWaitIdle` guards the layout transitions).
-
-Controls: `p` toggles the panel (X11 global grab; the game is an XWayland
-window). Progress/errors go to `/tmp/cs2_internal.log`.
-
-Notes:
-- Inject while at the main menu / before a match: if the swapchain already
-  exists the overlay waits for the next swapchain recreation (the log tells
-  you).
-- The trampoline machinery is verified by `./build/vk_hook_selftest`.
-- Same VAC caveat as the external build, with a larger detection surface
-  (injection + hooks).
+  signatures and memory-access patterns (injection + hooks increase the
+  surface).
+- **Why uinput instead of writing view angles?** Writing angles is detected
+  more easily and fights the game's own prediction; a virtual mouse behaves
+  like real input, supports raw-input matches, and recoil compensation just
+  works.
+- **Why is the aim slow / not hitting?** `kFracPerFrame` halves the movement
+  per frame by design (a full-speed 1.0 build is what shifted the layout and
+  broke the mouse). Tune FOV / smooth / inertia in the menu; refresh offsets
+  after every game update.
+- **The overlay is not showing.** Inject earlier (before the swapchain
+  exists) or recreate the swapchain: toggle fullscreen / resize / join a
+  match.
+- **F1 does nothing on GNOME.** Re-inject with the current build — the
+  recursive window lookup fixes Mutter's reparenting (old builds logged
+  `game_win=0x0` in `/tmp/cs2_x11_diag.log`).
 
 ## License
 
-MIT for this project's code. Dear ImGui (vendored in `third_party/imgui`) is MIT
-licensed; see its `LICENSE.txt`.
+MIT for this project's code. Dear ImGui (vendored in `third_party/imgui`) is
+MIT licensed; see its `LICENSE.txt`.
