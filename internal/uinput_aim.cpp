@@ -163,6 +163,14 @@ void move_to(float target_pitch, float target_yaw) {
     // Aiming only: the triggerbot owns firing (deadlocked separates them).
 }
 
+void move_counts_raw(int dx, int dy) {
+    if (g_fd < 0) return;
+    if (dx == 0 && dy == 0) return;
+    move_counts(dx, dy);
+}
+
+float live_sensitivity() { return ::live_sensitivity(); }
+
 void set_fire(bool on) {
     if (g_fd < 0 || on == g_firing) return;
     g_firing = on;

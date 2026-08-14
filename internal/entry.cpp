@@ -5,6 +5,7 @@
 #include "memory.h"
 #include "offsets.h"
 #include "overlay_ctx.h"
+#include "rcs.h"
 #include "patterns.h"
 #include "process.h"
 #include "process.h"
@@ -101,8 +102,8 @@ void check_bvh(const Memory& mem, const patterns::Resolved& off) {
     const std::string map = read_cstr(mem, name_ptr);
     if (map == last_map) return;
     last_map = map;
-    if (aimbot_init_bvh(mem, off.vphysWorld)) {
-        // loaded ok
+    if (aimbot_init_bvh(mem, off.vphysWorld, /*force=*/true)) {
+        // loaded ok (fresh geometry for the new map)
     } else {
         last_map.clear();  // failed: retry next 200 ms cycle
     }
@@ -157,6 +158,7 @@ void data_thread() {
     }
 
     Triggerbot trigger;
+    Rcs rcs;
     while (g_run.load()) {
         game.update(mem);
         {
@@ -192,8 +194,9 @@ void data_thread() {
             log_("aim: %s (aim_on=%d aim_toggle=%d)\n", aim ? "ACTIVE" : "off",
                  g_ctx.aim_on ? 1 : 0, g_ctx.aim_toggle ? 1 : 0);
         }
-        trigger.run(game, mem, trig, fire_now);  // schedule (delayed shot)
-        trigger.run_shoot();                      // drive the button
+        rcs.run(game, mem, g_ctx.rcs_on);          // recoil control (independent)
+        trigger.run(game, mem, trig, fire_now);    // schedule (delayed shot)
+        trigger.run_shoot();                       // drive the button
 
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }

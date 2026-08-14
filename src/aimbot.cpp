@@ -77,9 +77,10 @@ bool is_sniper(const std::string& name) {
 
 }  // namespace
 
-bool aimbot_init_bvh(const Memory& mem, std::uintptr_t vphys_world) {
+bool aimbot_init_bvh(const Memory& mem, std::uintptr_t vphys_world, bool force) {
     if (!vphys_world) return false;
-    if (g_map_bvh.triangle_count() != 0) return true;
+    if (force) g_map_bvh.reset();  // map changed: drop old geometry
+    if (!force && g_map_bvh.triangle_count() != 0) return true;
     return g_map_bvh.load(mem, vphys_world);
 }
 
@@ -128,29 +129,10 @@ bool run_aimbot(Game& game, const Memory& mem, bool enabled,
         g_ctx.aim_target_world = best->head;  // hint box follows this target
     }
 
-    // --- recoil compensation (deadlocked) ---
-    Vector3 punch{};
-    const bool have_punch = read_aim_punch(game, mem, punch);
-    const int shots =
-        mem.read<int>(game.local_pawn() + cs2cfg().offsets.m_iShotsFired).value_or(0);
-    const std::string wname = game.weapon_name(mem);
-    Vector3 eff{};
-    if (is_sniper(wname)) {
-        eff = {};  // snipers: no recoil compensation (deadlocked)
-    } else {
-        eff = punch * 2.0f;  // engine stores half the real punch
-        if (have_punch && eff.Length() == 0.f && shots > 1) {
-            // Punch cleared mid-spray: keep compensating with the last known value.
-            eff = g_prev_punch;
-        }
-    }
-    g_prev_punch = eff;
-
-    // Aim at `target - punch*2` so the recoil-raised crosshair hits the head.
+    // Recoil compensation is handled by the independent RCS module (src/rcs.cpp)
+    // exactly like deadlocked - the aimbot only steers toward the head.
     const Vector3 target_angle = CalcAngle(eye, best->head);
     Vector3 comp = target_angle;
-    comp.x -= eff.x;
-    comp.y -= eff.y;
     ClampAngle(comp);
     game.set_view_angles(mem, comp);
     return true;

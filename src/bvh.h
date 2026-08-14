@@ -67,6 +67,13 @@ public:
     // Loads + builds for the given physics world pointer. Returns false if no
     // triangles could be read (caller falls back to spotted mask).
     bool load(const Memory& mem, std::uintptr_t vphys_world);
+    // Drops the current map's geometry so the next load() rebuilds from the
+    // new map (must be called on map change, like deadlocked's check_bvh).
+    void reset() {
+        triangles_.clear();
+        nodes_.clear();
+        root_ = -1;
+    }
 
     // True when the segment start->end does not hit any collision triangle.
     bool has_line_of_sight(const Vector3& start, const Vector3& end) const;
