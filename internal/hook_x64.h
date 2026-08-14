@@ -107,6 +107,9 @@ struct Hook {
     void* fn = nullptr;
     void* trampoline = nullptr;
     int stolen_len = 0;
+    bool has_endbr = false;
+    std::uint8_t orig[24] = {};  // original bytes (stolen region, incl. endbr64)
+    std::uint8_t patch[14] = {}; // the 14-byte jmp we wrote
 };
 
 // Installs a jump at fn+4 -> detour, with a trampoline that replays the stolen
@@ -120,6 +123,9 @@ inline bool install(Hook& out, void* fn, void* detour) {
         base[0] == 0xf3 && base[1] == 0x0f && base[2] == 0x1e && base[3] == 0xfa;
     std::uint8_t* p = base + (has_endbr64 ? 4 : 0);
     const int patch_off = has_endbr64 ? 4 : 0;
+    out.has_endbr = has_endbr64;
+    for (int i = 0; i < 14; ++i)
+        out.orig[patch_off + i] = p[i];
     int len = 0;
     while (len < 16) {  // steal >= 16 bytes (patch writes 14) at instruction boundaries
         const int l = insn_len(p + len);
@@ -230,6 +236,27 @@ inline bool install(Hook& out, void* fn, void* detour) {
     out.stolen_len = len;
     std::fprintf(stderr, "hook64: hooked %p (stolen %d bytes)\n", fn, len);
     return true;
+}
+
+// Restores the original bytes and frees the trampoline. Safe to call even if
+// the hook was never installed (fn == nullptr).
+inline void uninstall(Hook& h) {
+    if (!h.fn) return;
+    auto* base = static_cast<std::uint8_t*>(h.fn);
+    const int patch_off = h.has_endbr ? 4 : 0;
+    const std::uintptr_t page = reinterpret_cast<std::uintptr_t>(base) & ~0xFFFULL;
+    if (mprotect(reinterpret_cast<void*>(page), 0x1000,
+                 PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
+        std::memcpy(base + patch_off, h.orig + patch_off, 14);
+        __builtin___clear_cache(reinterpret_cast<char*>(base + patch_off),
+                                reinterpret_cast<char*>(base + patch_off) + 14);
+        mprotect(reinterpret_cast<void*>(page), 0x1000, PROT_READ | PROT_EXEC);
+    }
+    if (h.trampoline)
+        munmap(h.trampoline, static_cast<std::size_t>(h.stolen_len) + 16);
+    h.fn = nullptr;
+    h.trampoline = nullptr;
+    h.stolen_len = 0;
 }
 
 }  // namespace hook64

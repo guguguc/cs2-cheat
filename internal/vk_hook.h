@@ -8,6 +8,7 @@ namespace vk_hook {
 // dlopen libvulkan and patch vkQueuePresentKHR / vkCreateDevice /
 // vkCreateSwapchainKHR / vkCreateInstance.
 void install();
+void uninstall();
 
 // True once the hooks are in place.
 bool installed();

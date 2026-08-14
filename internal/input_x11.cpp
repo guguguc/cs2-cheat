@@ -11,7 +11,20 @@
 
 #include <unistd.h>
 
+#include <cstdarg>
+#include <cstdio>
+
 namespace {
+void xi_diag(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
+void xi_diag(const char* fmt, ...) {
+    FILE* f = std::fopen("/tmp/cs2_x11_diag.log", "a");  // separate file, no spam
+    if (!f) return;
+    va_list ap;
+    va_start(ap, fmt);
+    std::vfprintf(f, fmt, ap);
+    va_end(ap);
+    std::fclose(f);
+}
 
 Display* dpy = nullptr;
 Window root = 0;
@@ -26,30 +39,45 @@ double raw_x = 0, raw_y = 0;
 double last_qx = 0, last_qy = 0;
 bool panel_was_open = false;
 
-Window find_game_window() {
+// Recursively searches the window tree for a window whose _NET_WM_PID
+// matches our pid. GNOME/Mutter reparents X11 windows under a
+// "mutter-x11-frames" decoration window, so the game window is NOT a direct
+// child of the root - a single-level XQueryTree walk misses it (F1/input
+// dead on GNOME, fine on Hyprland which does not reparent). DFS covers both.
+Window find_game_window_recursive(Window w, pid_t self) {
     Window root_ret = 0, parent = 0;
     Window* children = nullptr;
     unsigned n = 0;
-    if (!XQueryTree(dpy, root, &root_ret, &parent, &children, &n)) return 0;
-    const pid_t self = getpid();
-    Window found = 0;
-    for (unsigned i = 0; i < n && !found; ++i) {
-        Atom pid_atom = XInternAtom(dpy, "_NET_WM_PID", True);
-        if (pid_atom == None) continue;
+    // Check the window itself first.
+    Atom pid_atom = XInternAtom(dpy, "_NET_WM_PID", True);
+    if (pid_atom != None) {
         Atom type = None;
         int format = 0;
         unsigned long nitems = 0, after = 0;
         unsigned char* data = nullptr;
-        if (XGetWindowProperty(dpy, children[i], pid_atom, 0, 1, False, XA_CARDINAL, &type,
+        if (XGetWindowProperty(dpy, w, pid_atom, 0, 1, False, XA_CARDINAL, &type,
                                &format, &nitems, &after, &data) == Success &&
             data && nitems == 1 && format == 32 &&
             *reinterpret_cast<unsigned long*>(data) == static_cast<unsigned long>(self)) {
-            found = children[i];
+            if (data) XFree(data);
+            return w;
         }
         if (data) XFree(data);
     }
+    if (!XQueryTree(dpy, w, &root_ret, &parent, &children, &n)) {
+        if (children) XFree(children);
+        return 0;
+    }
+    Window found = 0;
+    for (unsigned i = 0; i < n && !found; ++i)
+        found = find_game_window_recursive(children[i], self);
     if (children) XFree(children);
     return found;
+}
+
+Window find_game_window() {
+    const pid_t self = getpid();
+    return find_game_window_recursive(root, self);
 }
 
 }  // namespace
@@ -78,13 +106,18 @@ bool init() {
     key_f1 = XKeysymToKeycode(dpy, XK_F1);
     // 'x' is unbound by default in CS2 (avoid 'a' = strafe-left).
     key_aim = XKeysymToKeycode(dpy, XK_x);
+    int grab_p = 0, grab_f1 = 0, grab_aim = 0;
     if (key_p && game_win)
-        XGrabKey(dpy, key_p, AnyModifier, root, True, GrabModeAsync, GrabModeAsync);
+        grab_p = XGrabKey(dpy, key_p, AnyModifier, root, True, GrabModeAsync, GrabModeAsync);
     if (key_f1 && game_win)
-        XGrabKey(dpy, key_f1, AnyModifier, root, True, GrabModeAsync, GrabModeAsync);
+        grab_f1 = XGrabKey(dpy, key_f1, AnyModifier, root, True, GrabModeAsync, GrabModeAsync);
     if (key_aim && game_win)
-        XGrabKey(dpy, key_aim, AnyModifier, root, True, GrabModeAsync, GrabModeAsync);
+        grab_aim = XGrabKey(dpy, key_aim, AnyModifier, root, True, GrabModeAsync, GrabModeAsync);
     XSync(dpy, False);
+    xi_diag("init: dpy=%p root=0x%lx game_win=0x%lx xi_ok=%d key_p=%d key_f1=%d key_aim=%d grab_p=%d grab_f1=%d grab_aim=%d\n",
+            static_cast<void*>(dpy), static_cast<unsigned long>(root),
+            static_cast<unsigned long>(game_win), xi_ok ? 1 : 0,
+            key_p, key_f1, key_aim, grab_p, grab_f1, grab_aim);
     return game_win != 0;
 }
 
@@ -175,6 +208,23 @@ void poll(ImGuiIO& io) {
         if (cur[b] != prev_buttons[b]) io.AddMouseButtonEvent(b, cur[b]);
         prev_buttons[b] = cur[b];
     }
+}
+
+void shutdown() {
+    if (!dpy) return;
+    if (key_p && root)
+        XUngrabKey(dpy, key_p, AnyModifier, root);
+    if (key_f1 && root)
+        XUngrabKey(dpy, key_f1, AnyModifier, root);
+    if (key_aim && root)
+        XUngrabKey(dpy, key_aim, AnyModifier, root);
+    XSync(dpy, False);
+    XCloseDisplay(dpy);
+    dpy = nullptr;
+    root = 0;
+    game_win = 0;
+    xi_ok = false;
+    std::fprintf(stderr, "input_x11: closed\n");
 }
 
 bool raw_tracking() { return xi_ok; }

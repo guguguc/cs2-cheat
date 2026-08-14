@@ -9,6 +9,9 @@ namespace input_x11 {
 
 bool init();
 void poll(ImGuiIO& io);
+// Closes the X11 connection and releases the key grabs. Safe to call even if
+// init() never succeeded.
+void shutdown();
 // True when the XInput2 raw-motion path is active (cursor follows the mouse
 // even when the game freezes the OS cursor).
 bool raw_tracking();

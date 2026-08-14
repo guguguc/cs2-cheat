@@ -28,11 +28,11 @@ std::uintptr_t parse_hex(const std::string& s) {
 }  // namespace
 
 static Config& cfg_impl() {
-    cfg_log("cfg: entered\n");
     static Config c;
     static bool init = false;
     if (init) return c;
     init = true;
+    cfg_log("cfg: loaded once\n");
 
     const char* path = std::getenv("CS2_CONFIG");
     const char* def = "/home/gugugu/Repo/cs2-cheat/config/cs2_config.json";

@@ -595,4 +595,13 @@ void install() {
 
 bool installed() { return g_hooked; }
 
+void uninstall() {
+    hook64::uninstall(h_icd_present);
+    hook64::uninstall(h_icd_swapchain);
+    hook64::uninstall(h_create_instance);
+    hook64::uninstall(h_create_device);
+    g_hooked = false;
+    std::fprintf(stderr, "vk_hook: uninstalled\n");
+}
+
 }  // namespace vk_hook

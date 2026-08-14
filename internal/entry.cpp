@@ -30,6 +30,11 @@ SharedCtx g_ctx;
 namespace {
 
 std::atomic<bool> g_run{true};
+// Set by the data thread right before it exits (all return paths), so
+// unload_self can wait for it before the library is dlclosed. Without this
+// the unloader used to race the still-running thread and dlclose could unmap
+// the library under it.
+std::atomic<bool> g_thread_done{false};
 
 void log_(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 void log_(const char* fmt, ...) {
@@ -54,11 +59,15 @@ void data_thread() {
             patterns::resolve(getpid(), off);
         }
     }
-    if (!off.ok) return;
+    if (!off.ok) {
+        g_thread_done.store(true);
+        return;
+    }
 
     Game game;
     if (!game.attach(mem, off)) {
         log_("entry: game attach failed\n");
+        g_thread_done.store(true);
         return;
     }
     log_("entry: attached, offsets ok, client base 0x%llx\n",
@@ -117,6 +126,8 @@ void data_thread() {
 
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
+    g_thread_done.store(true);
+    log_("data_thread: exited\n");
 }
 
 }  // namespace
@@ -134,4 +145,26 @@ __attribute__((constructor)) static void so_entry() {
 __attribute__((destructor)) static void so_exit() {
     g_run.store(false);
     std::fprintf(stderr, "cs2_internal: unloaded\n");
+}
+
+// Called remotely by the unloader tool (injector_call). Stops the data
+// thread, restores the Vulkan hooks, destroys the uinput device and releases
+// the X11 connection so the library can be dlclosed safely.
+extern "C" void unload_self() {
+    g_run.store(false);
+    // Wait for the data thread to actually exit (it polls g_run every ~16 ms).
+    // Previous code only waited for the uinput device to go inactive, so
+    // dlclose could unmap the library while the thread was still running.
+    for (int i = 0; i < 400; ++i) {  // up to 2 s
+        if (g_thread_done.load()) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    // Stop rendering first so no other thread can touch the X11 connection
+    // while we close it below.
+    vk_hook::uninstall();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    uinput_aim::shutdown();
+    input_x11::shutdown();
+    std::fprintf(stderr, "cs2_internal: unload_self done (thread_done=%d)\n",
+                 g_thread_done.load() ? 1 : 0);
 }
