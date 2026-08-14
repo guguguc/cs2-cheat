@@ -140,6 +140,40 @@ void aim_hint(SharedCtx& ctx, const ImVec2& display) {
     (void)FLT_MAX;
 }
 
+// --- vector tab icons (no font glyphs needed; theme-colored) -------------
+void draw_icon_crosshair(ImDrawList* dl, ImVec2 c, float r, ImU32 col) {
+    dl->AddLine({c.x - r, c.y}, {c.x + r, c.y}, col, 1.8f);
+    dl->AddLine({c.x, c.y - r}, {c.x, c.y + r}, col, 1.8f);
+    dl->AddCircleFilled(c, 1.6f, col);
+}
+void draw_icon_eye(ImDrawList* dl, ImVec2 c, float r, ImU32 col) {
+    const int seg = 24;
+    std::vector<ImVec2> top, bot;
+    for (int i = 0; i <= seg; ++i) {
+        const float t = 3.14159265f * static_cast<float>(i) / static_cast<float>(seg);
+        top.push_back({c.x + r * std::cos(t) * 1.3f, c.y - r * std::sin(t) * 0.55f});
+        bot.push_back({c.x - r * std::cos(t) * 1.3f, c.y + r * std::sin(t) * 0.55f});
+    }
+    dl->AddPolyline(top.data(), static_cast<int>(top.size()), col, 0, 1.8f);
+    dl->AddPolyline(bot.data(), static_cast<int>(bot.size()), col, 0, 1.8f);
+    dl->AddCircleFilled(c, r * 0.30f, col);
+}
+void draw_icon_target(ImDrawList* dl, ImVec2 c, float r, ImU32 col) {
+    dl->AddCircle(c, r, col, 24, 1.8f);
+    dl->AddCircle(c, r * 0.55f, col, 24, 1.5f);
+    dl->AddCircleFilled(c, 1.6f, col);
+}
+void draw_icon_gear(ImDrawList* dl, ImVec2 c, float r, ImU32 col) {
+    dl->AddCircle(c, r * 0.6f, col, 24, 2.0f);
+    for (int i = 0; i < 8; ++i) {
+        const float a = 6.2831853f * static_cast<float>(i) / 8.f;
+        const ImVec2 p1{c.x + std::cos(a) * r * 0.95f, c.y + std::sin(a) * r * 0.95f};
+        const ImVec2 p2{c.x + std::cos(a) * r * 1.35f, c.y + std::sin(a) * r * 1.35f};
+        dl->AddLine(p1, p2, col, 2.0f);
+    }
+    dl->AddCircleFilled(c, 1.6f, col);
+}
+
 // iOS-style switch: rounded track + sliding knob, animated. Returns true when
 // the user clicks it. Keeps ImGui state via an invisible button.
 bool ui_toggle(const char* label, bool* v) {
@@ -206,21 +240,41 @@ void panel(SharedCtx& ctx) {
     ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.f, 1.f, 1.f, 0.08f));
     ImGui::BeginChild("nav", ImVec2(150.f, ImGui::GetContentRegionAvail().y), true);
     const char* tabs[] = {"AIM", "ESP", "TRIGGER", "SETTINGS"};
+    const float nav_w = ImGui::GetContentRegionAvail().x;
     for (int i = 0; i < 4; ++i) {
-        if (i == ctx.ui_tab) {
-            // Selected tab: green-tinted background (matches theme).
-            ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.25f, 0.95f, 0.60f, 0.22f));
-            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.25f, 0.95f, 0.60f, 0.30f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.25f, 0.95f, 0.60f, 1.f));
-            if (ImGui::Selectable(tabs[i], true, 0, ImVec2(ImGui::GetContentRegionAvail().x, 0.f)))
-                ctx.ui_tab = i;
-            ImGui::PopStyleColor(3);
-        } else {
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.90f, 0.92f, 0.95f, 0.85f));
-            if (ImGui::Selectable(tabs[i], false, 0, ImVec2(ImGui::GetContentRegionAvail().x, 0.f)))
-                ctx.ui_tab = i;
-            ImGui::PopStyleColor(1);
+        const bool sel = (i == ctx.ui_tab);
+        const ImVec2 cpos = ImGui::GetCursorScreenPos();
+        const float row_h = ImGui::GetFrameHeight() + 6.f;
+        ImGui::InvisibleButton(tabs[i], ImVec2(nav_w, row_h));
+        const bool hovered = ImGui::IsItemHovered();
+        const bool clicked = ImGui::IsItemClicked();
+        if (clicked) ctx.ui_tab = i;
+
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const ImU32 text_col = sel ? IM_COL32(0x40, 0xF2, 0x99, 255)
+                                   : (hovered ? IM_COL32(0.95f*255, 0.96f*255, 1.0f*255, 255)
+                                              : IM_COL32(0xE0, 0xE4, 0xEA, 220));
+        if (sel) {
+            // rounded green-tinted selection background
+            dl->AddRectFilled(cpos, ImVec2(cpos.x + nav_w, cpos.y + row_h),
+                              IM_COL32(0x40, 0xF2, 0x99, 26), 6.f);
+            // left indicator bar
+            dl->AddRectFilled(ImVec2(cpos.x, cpos.y + 3.f),
+                              ImVec2(cpos.x + 3.f, cpos.y + row_h - 3.f),
+                              IM_COL32(0x40, 0xF2, 0x99, 255), 1.5f);
+        } else if (hovered) {
+            dl->AddRectFilled(cpos, ImVec2(cpos.x + nav_w, cpos.y + row_h),
+                              IM_COL32(255, 255, 255, 10), 6.f);
         }
+        // vector icon + label
+        const ImVec2 ic{cpos.x + 14.f, cpos.y + row_h * 0.5f};
+        const float ir = 7.f;
+        if (tabs[i][0] == 'A') draw_icon_crosshair(dl, ic, ir, text_col);
+        else if (tabs[i][0] == 'E') draw_icon_eye(dl, ic, ir, text_col);
+        else if (tabs[i][0] == 'T') draw_icon_target(dl, ic, ir, text_col);
+        else draw_icon_gear(dl, ic, ir, text_col);
+        dl->AddText(ImVec2(cpos.x + 30.f, cpos.y + 3.f), text_col, tabs[i]);
+        ImGui::Dummy(ImVec2(0.f, 4.f));
     }
     ImGui::EndChild();
     ImGui::PopStyleColor(2);
@@ -239,9 +293,7 @@ void panel(SharedCtx& ctx) {
             if (ctx.aim_on != prev) ctx.aim_toggle = ctx.aim_on;
         }
         if (ctx.aim_on) {
-            ImGui::Indent(18.f);
             ui_toggle("Visibility check", &ctx.visibility_check);
-            ImGui::Unindent(18.f);
         }
         ImGui::Spacing();
         ImGui::Separator();
@@ -255,9 +307,7 @@ void panel(SharedCtx& ctx) {
     else if (ctx.ui_tab == 1) {
         ui_toggle("ESP", &ctx.esp_on);
         if (ctx.esp_on) {
-            ImGui::Indent(18.f);
             ui_toggle("Head circle", &ctx.head_circle);
-            ImGui::Unindent(18.f);
         }
         ImGui::Spacing();
         ImGui::Separator();
@@ -269,9 +319,15 @@ void panel(SharedCtx& ctx) {
     else if (ctx.ui_tab == 2) {
         ui_toggle("Triggerbot", &ctx.trigger_on);
         if (ctx.trigger_on) {
-            ImGui::Indent(18.f);
             ui_toggle("Head only", &ctx.trigger_head_only);
-            ImGui::Unindent(18.f);
+        }
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::TextDisabled("RECOIL CONTROL (RCS)");
+        ui_toggle("RCS", &ctx.rcs_on);
+        if (ctx.rcs_on) {
+            ImGui::SliderFloat("Strength", &ctx.rcs_strength, 0.f, 1.f, "%.2f");
         }
     }
     // ---------------------------- SETTINGS ---------------------------

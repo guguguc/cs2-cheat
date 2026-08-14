@@ -469,6 +469,11 @@ bool init_render(VkQueue queue) {
     if (fp_AllocateCommandBuffers(g_device, &cba, &g_cmd) != VK_SUCCESS) return false;
 
     // --- ImGui ----------------------------------------------------------------
+    // The overlay is re-initialized every time the game recreates its
+    // swapchain (resolution/fullscreen toggle). ImGui must only be created
+    // ONCE - recreating the context and reloading fonts froze the game on
+    // resolution switches.
+    // --- ImGui ----------------------------------------------------------------
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     apply_modern_theme();
