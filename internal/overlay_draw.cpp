@@ -72,6 +72,22 @@ void esp(SharedCtx& ctx, const ImVec2& display) {
             dl->AddLine({a.x, a.y}, {b.x, b.y}, col, 1.2f);
         }
 
+        // ---- head circle (deadlocked: radius from spine3->neck height) ----
+        if (ctx.head_circle && p.bone_pos.size() > 6 && p.bone_pos.size() > 4) {
+            Vector2 neck, spine3;
+            if (WorldToScreen(p.bone_pos[6], snap.view_matrix,
+                              static_cast<int>(sw), static_cast<int>(sh), neck) &&
+                WorldToScreen(p.bone_pos[4], snap.view_matrix,
+                              static_cast<int>(sw), static_cast<int>(sh), spine3)) {
+                const float h = spine3.y - neck.y;
+                if (h > 1.f) {
+                    const ImVec2 c{neck.x - (spine3.x - neck.x) * 0.5f,
+                                   neck.y - h * 0.5f};
+                    dl->AddCircle(c, h * 0.5f, col, 0, 1.5f);
+                }
+            }
+        }
+
         const float box_h = feet.y - head.y;
         if (box_h < 8.f) continue;
         const float box_w = std::max(4.f, box_h * 0.55f);
@@ -124,13 +140,58 @@ void aim_hint(SharedCtx& ctx, const ImVec2& display) {
     (void)FLT_MAX;
 }
 
+// iOS-style switch: rounded track + sliding knob, animated. Returns true when
+// the user clicks it. Keeps ImGui state via an invisible button.
+bool ui_toggle(const char* label, bool* v) {
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float h = ImGui::GetFrameHeight();
+    const float w = h * 1.9f;
+    const float radius = h * 0.5f;
+    ImGui::InvisibleButton(label, ImVec2(w, h));
+    const bool hovered = ImGui::IsItemHovered();
+    const bool clicked = ImGui::IsItemClicked();
+    if (clicked) *v = !*v;
+
+    // Animated knob position (ease toward target). Each toggle keeps its own
+    // animation state in ImGui's per-window storage, keyed by its label ID -
+    // a shared static would make every switch move together.
+    const float target = *v ? 1.f : 0.f;
+    constexpr float kAnim = 0.35f;  // per-frame blend
+    ImGuiID id = ImGui::GetID(label);
+    float* animp = ImGui::GetStateStorage()->GetFloatRef(id, 0.f);
+    float& anim = *animp;
+    anim += (target - anim) * kAnim;
+    if (anim < 0.001f) anim = 0.f;
+    if (anim > 0.999f) anim = 1.f;
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    // Track: green when on, grey when off.
+    const ImU32 track = *v ? IM_COL32(0x00, 0xA8, 0x6B, 255)  // deep emerald #00A86B
+                           : (hovered ? IM_COL32(120, 120, 125, 150)
+                                      : IM_COL32(95, 95, 100, 130));
+    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), track, radius);
+    // Knob with a subtle border.
+    const float pad = 2.f;
+    const float kx = p.x + pad + anim * (w - 2.f * radius);
+    dl->AddCircleFilled(ImVec2(kx + radius - pad, p.y + radius), radius - pad,
+                        IM_COL32(255, 255, 255, 255));
+    dl->AddCircle(ImVec2(kx + radius - pad, p.y + radius), radius - pad,
+                  IM_COL32(0, 0, 0, 60), 0, 1.f);
+
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    return clicked;
+}
+
 void panel(SharedCtx& ctx) {
     if (!ctx.panel_open) return;
 
     ImGui::SetNextWindowPos({16.f, 16.f}, ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(560.f, 420.f), ImGuiCond_FirstUseEver);
     ImGui::Begin("cs2-internal", nullptr,
-                 ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse |
-                     ImGuiWindowFlags_NoTitleBar);  // no title bar
+                 ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar |
+                     ImGuiWindowFlags_NoResize);  // fixed size, no title bar
 
     // ---- header ----
     ImGui::PushFont(ImGui::GetIO().Fonts->Fonts.empty() ? nullptr
@@ -139,55 +200,97 @@ void panel(SharedCtx& ctx) {
     ImGui::PopFont();
     ImGui::TextDisabled("cheat menu · F1 to close");
     ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
 
-    // ---- toggles ----
-    ImGui::Checkbox("ESP", &ctx.esp_on);
-    {
-        const bool prev = ctx.aim_on;
-        ImGui::Checkbox("Aimbot", &ctx.aim_on);
-        if (ctx.aim_on != prev) ctx.aim_toggle = ctx.aim_on;
+    // ---- left vertical nav (theme-green selection) + content ----
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.f, 0.f, 0.f, 1.f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.f, 1.f, 1.f, 0.08f));
+    ImGui::BeginChild("nav", ImVec2(150.f, ImGui::GetContentRegionAvail().y), true);
+    const char* tabs[] = {"AIM", "ESP", "TRIGGER", "SETTINGS"};
+    for (int i = 0; i < 4; ++i) {
+        if (i == ctx.ui_tab) {
+            // Selected tab: green-tinted background (matches theme).
+            ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.25f, 0.95f, 0.60f, 0.22f));
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.25f, 0.95f, 0.60f, 0.30f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.25f, 0.95f, 0.60f, 1.f));
+            if (ImGui::Selectable(tabs[i], true, 0, ImVec2(ImGui::GetContentRegionAvail().x, 0.f)))
+                ctx.ui_tab = i;
+            ImGui::PopStyleColor(3);
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.90f, 0.92f, 0.95f, 0.85f));
+            if (ImGui::Selectable(tabs[i], false, 0, ImVec2(ImGui::GetContentRegionAvail().x, 0.f)))
+                ctx.ui_tab = i;
+            ImGui::PopStyleColor(1);
+        }
     }
-    if (ctx.aim_on) {
-        ImGui::Indent(18.f);
-        ImGui::Checkbox("Visibility check", &ctx.visibility_check);
-        ImGui::Unindent(18.f);
+    ImGui::EndChild();
+    ImGui::PopStyleColor(2);
+
+    ImGui::SameLine();
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.f, 0.f, 0.f, 1.f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(1.f, 1.f, 1.f, 0.08f));
+    ImGui::BeginChild("content", ImVec2(390.f, ImGui::GetContentRegionAvail().y), true);
+    ImGui::SetCursorPos(ImVec2(12.f, 10.f));  // padding from the content border
+
+    // ------------------------------ AIM ------------------------------
+    if (ctx.ui_tab == 0) {
+        {
+            const bool prev = ctx.aim_on;
+            ui_toggle("Aimbot", &ctx.aim_on);
+            if (ctx.aim_on != prev) ctx.aim_toggle = ctx.aim_on;
+        }
+        if (ctx.aim_on) {
+            ImGui::Indent(18.f);
+            ui_toggle("Visibility check", &ctx.visibility_check);
+            ImGui::Unindent(18.f);
+        }
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::TextDisabled("AIM SETTINGS");
+        ImGui::SliderFloat("FOV (deg)", &ctx.aim_fov, 1.f, 60.f, "%.1f");
+        ImGui::SliderFloat("Smooth", &ctx.aim_smooth, 1.f, 30.f, "%.1f");
+        ImGui::SliderFloat("Max dist (m)", &ctx.esp_max_dist, 10.f, 400.f, "%.0f");
     }
-    ImGui::Checkbox("Triggerbot", &ctx.trigger_on);
-    if (ctx.trigger_on) {
-        ImGui::Indent(18.f);
-        ImGui::Checkbox("Head only", &ctx.trigger_head_only);
-        ImGui::Unindent(18.f);
+    // ------------------------------ ESP ------------------------------
+    else if (ctx.ui_tab == 1) {
+        ui_toggle("ESP", &ctx.esp_on);
+        if (ctx.esp_on) {
+            ImGui::Indent(18.f);
+            ui_toggle("Head circle", &ctx.head_circle);
+            ImGui::Unindent(18.f);
+        }
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        ImGui::TextDisabled("ESP SETTINGS");
+        ImGui::SliderFloat("Max dist (m)", &ctx.esp_max_dist, 10.f, 400.f, "%.0f");
+    }
+    // ---------------------------- TRIGGER ----------------------------
+    else if (ctx.ui_tab == 2) {
+        ui_toggle("Triggerbot", &ctx.trigger_on);
+        if (ctx.trigger_on) {
+            ImGui::Indent(18.f);
+            ui_toggle("Head only", &ctx.trigger_head_only);
+            ImGui::Unindent(18.f);
+        }
+    }
+    // ---------------------------- SETTINGS ---------------------------
+    else {
+        const bool in_match = ctx.valid;
+        const char* status = in_match ? "IN MATCH" : "MENU / LOBBY";
+        const ImVec4 status_col = in_match ? ImVec4(0.25f, 0.95f, 0.60f, 1.f)
+                                           : ImVec4(0.95f, 0.60f, 0.25f, 1.f);
+        ImGui::TextColored(status_col, "● %s", status);
+        int enemies = 0;
+        for (const Player& p : ctx.snap.players) {
+            if (p.valid && p.alive && p.team != ctx.snap.local.team) ++enemies;
+        }
+        ImGui::TextDisabled("enemies: %d", enemies);
+        ImGui::TextDisabled("aim: %s", ctx.aim_active ? "locking" : "idle");
     }
 
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    // ---- sliders ----
-    ImGui::TextDisabled("AIM SETTINGS");
-    ImGui::SliderFloat("FOV (deg)", &ctx.aim_fov, 1.f, 60.f, "%.1f");
-    ImGui::SliderFloat("Smooth", &ctx.aim_smooth, 1.f, 30.f, "%.1f");
-    ImGui::SliderFloat("Max dist (m)", &ctx.esp_max_dist, 10.f, 400.f, "%.0f");
-
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-
-    // ---- status ----
-    const bool in_match = ctx.valid;
-    const char* status = in_match ? "IN MATCH" : "MENU / LOBBY";
-    const ImVec4 status_col = in_match ? ImVec4(0.25f, 0.95f, 0.60f, 1.f)
-                                       : ImVec4(0.95f, 0.60f, 0.25f, 1.f);
-    ImGui::TextColored(status_col, "● %s", status);
-    int enemies = 0;
-    for (const Player& p : ctx.snap.players) {
-        if (p.valid && p.alive && p.team != ctx.snap.local.team) ++enemies;
-    }
-    ImGui::TextDisabled("enemies: %d", enemies);
-    ImGui::TextDisabled("aim: %s", ctx.aim_active ? "locking" : "idle");
-
+    ImGui::EndChild();
+    ImGui::PopStyleColor(2);
     ImGui::End();
 }
 
