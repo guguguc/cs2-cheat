@@ -1,8 +1,10 @@
 #include "aimbot.h"
 
+#include "bvh.h"
 #include "cfg.h"
 #include "config.h"
 #include "math.h"
+#include "overlay_ctx.h"
 
 namespace {
 
@@ -44,6 +46,25 @@ bool read_aim_punch(const Game& game, const Memory& mem, Vector3& out) {
 Vector3 g_prev_punch{};
 std::uintptr_t g_locked_target = 0;  // deadlocked target lock: keep until invalid
 
+// Map BVH for visibility (deadlocked default visibility_check=true). Loaded
+// once per map by the data thread (bvh::load); empty -> visibility check off.
+bvh::MapBvh g_map_bvh;
+
+// deadlocked visible(): ray from the local eye to 5 bones; ANY clear bone =
+// visible. Bones: Head(7), LeftFoot(19), RightFoot(22), LeftHand(11),
+// RightHand(15).
+bool target_visible(const Game& game, const Memory& mem, const Player& target) {
+    if (g_map_bvh.triangle_count() == 0) return true;  // BVH not loaded
+    const Vector3 eye = game.local_eye(mem);
+    const int bones[5] = {7, 19, 22, 11, 15};
+    for (const int b : bones) {
+        Vector3 pos{};
+        if (!game.read_bone(mem, target.address, b, pos)) continue;
+        if (g_map_bvh.has_line_of_sight(eye, pos)) return true;
+    }
+    return false;
+}
+
 // deadlocked distance_scale: far targets get a tight FOV, close ones wider.
 float distance_scale(float distance) {
     if (distance > 500.f) return 1.0f;
@@ -55,6 +76,12 @@ bool is_sniper(const std::string& name) {
 }
 
 }  // namespace
+
+bool aimbot_init_bvh(const Memory& mem, std::uintptr_t vphys_world) {
+    if (!vphys_world) return false;
+    if (g_map_bvh.triangle_count() != 0) return true;
+    return g_map_bvh.load(mem, vphys_world);
+}
 
 bool run_aimbot(Game& game, const Memory& mem, bool enabled,
                 float fov_deg, float smooth) {
@@ -75,6 +102,8 @@ bool run_aimbot(Game& game, const Memory& mem, bool enabled,
             if (!p.valid || !p.alive || p.local) continue;
             if (p.team == local.team) continue;
             if (p.distance_m > cfg::AIM_MAX_DISTANCE_M) continue;
+            if (g_ctx.visibility_check && !target_visible(game, mem, p))
+                continue;  // optional BVH line-of-sight filter (menu toggle)
             const Vector3 target = CalcAngle(eye, p.head);
             const float dist = AngleDistance(target, game.view_angles());
             const float limit = fov_deg * distance_scale(p.distance_m);

@@ -170,11 +170,12 @@ bool resolve(int pid, Resolved& out) {
         Slot s;
         s.pat.hex = pc.pattern.c_str();
         s.pat.add = pc.off;
-        s.pat.op = pc.op == "read"   ? Op::Read
-                   : pc.op == "abs4" ? Op::Abs4
-                   : pc.op == "abs5" ? Op::Abs5
-                                     : Op::None;
+        s.pat.op = pc.op == "read"      ? Op::Read
+                   : pc.op == "abs4"      ? Op::Abs4
+                   : pc.op == "abs5"      ? Op::Abs5
+                                          : Op::None;
         s.pat.read_size = pc.size;
+        s.pat.len = pc.len;
 
         const auto bytes = parse_pattern(s.pat.hex);
         const auto hits = find_all(text, ranges.front().start, bytes);
@@ -201,10 +202,11 @@ bool resolve(int pid, Resolved& out) {
                 const auto disp = read_at<std::int32_t>(mem, match + s.pat.add);
                 if (disp)
                     s.value = match + s.pat.add +
-                              (s.pat.op == Op::Abs4 ? 4 : 5) +
+                              static_cast<std::uintptr_t>(s.pat.len) +
                               static_cast<std::uintptr_t>(*disp);
                 break;
             }
+
             case Op::None:
                 s.value = match + s.pat.add;
                 break;
@@ -234,6 +236,7 @@ bool resolve(int pid, Resolved& out) {
     out.globalVars = get("globalVars");
     out.viewMatrix = get("viewMatrix");
     out.viewRender = get("viewRender");
+    out.vphysWorld = get("vphysWorld");
 
     out.ok = true;
     for (const auto& name : conf.required) {

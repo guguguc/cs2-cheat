@@ -61,6 +61,13 @@ public:
     std::uintptr_t client_base() const { return client_base_; }
     std::uintptr_t local_pawn() const { return local_pawn_; }
     Vector3 view_angles() const { return view_angles_; }
+    // Forward unit vector from view angles (pitch/yaw in degrees).
+    Vector3 view_forward() const {
+        const float p = view_angles_.x * 0.0174532925f;
+        const float y = view_angles_.y * 0.0174532925f;
+        const float cp = std::cos(p);
+        return {cp * std::cos(y), cp * std::sin(y), std::sin(p)};
+    }
     const Player& local() const { return local_; }
     const std::vector<Player>& players() const { return players_; }
     Snapshot snapshot() const;
@@ -81,11 +88,12 @@ public:
     std::uintptr_t entity_by_index(const Memory& mem, int index) const;
     int entity_team(const Memory& mem, std::uintptr_t ent) const;
     int entity_health(const Memory& mem, std::uintptr_t ent) const;
+    // Reads a single bone world position (BVH visibility check).
+    bool read_bone(const Memory& mem, std::uintptr_t pawn, int bone, Vector3& out) const;
 
 private:
     void read_player(const Memory& mem, std::uintptr_t addr,
                      bool is_local, Player& out) const;
-    bool read_bone(const Memory& mem, std::uintptr_t pawn, int bone, Vector3& out) const;
     // Reads the full bone skeleton (parents / world positions / flags).
     void read_skeleton(const Memory& mem, std::uintptr_t pawn, Player& out) const;
     void project_radar(const Player& local, Player& p) const;

@@ -28,8 +28,11 @@ struct Vector3 {
     Vector3 operator+(const Vector3& o) const { return {x + o.x, y + o.y, z + o.z}; }
     Vector3 operator-(const Vector3& o) const { return {x - o.x, y - o.y, z - o.z}; }
     Vector3 operator*(float s) const { return {x * s, y * s, z * s}; }
+    Vector3 operator*(const Vector3& o) const { return {x * o.x, y * o.y, z * o.z}; }
     Vector3 operator/(float s) const { return {x / s, y / s, z / s}; }
 
+    float& operator[](int i) { return i == 0 ? x : (i == 1 ? y : z); }
+    float operator[](int i) const { return i == 0 ? x : (i == 1 ? y : z); }
     float Length() const { return std::sqrt(x * x + y * y + z * z); }
     float Length2D() const { return std::sqrt(x * x + y * y); }
 };

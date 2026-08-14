@@ -59,7 +59,8 @@
       "name": "localPlayerController",
       "pattern": "48 83 3D ?? ?? ?? ?? ?? 0F 95 C0 C3",
       "off": 3,
-      "op": "abs5"
+      "op": "abs5",
+      "len": 5
     },
     {
       "name": "globalVars",
@@ -78,6 +79,13 @@
       "pattern": "48 8D 05 ?? ?? ?? ?? 48 89 38 48 85",
       "off": 3,
       "op": "abs4"
+    },
+    {
+      "name": "vphysWorld",
+      "pattern": "4C 8D 35 ?? ?? ?? ?? 49 8B 3E E8 ?? ?? ?? ?? 48 89 C2",
+      "off": 3,
+      "op": "abs4",
+      "len": 4
     }
   ],
   "required": [

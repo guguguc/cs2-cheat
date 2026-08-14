@@ -23,6 +23,7 @@ struct Pattern {
     int add = 0;       // byte offset within the match where the value lives
     Op op = Op::None;
     int read_size = 4; // Read op: 1 (disp8) or 4 (disp32) bytes
+    int len = 4;       // Abs op: instruction length after the disp (RIP-relative)
 };
 
 // Everything the cheat needs, resolved from the live binary.
@@ -33,6 +34,7 @@ struct Resolved {
     std::uintptr_t globalVars = 0;             // GlobalVars** (slot)
     std::uintptr_t viewMatrix = 0;             // VMatrix* (direct)
     std::uintptr_t viewRender = 0;             // CViewRender** (slot)
+    std::uintptr_t vphysWorld = 0;             // IVPhysicsWorld** (slot, BVH LOS)
 
     // --- entity system ------------------------------------------------------
     int entityListOffset = 0;  // *gameEntitySystem + this -> CConcreteEntityList

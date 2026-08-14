@@ -70,6 +70,7 @@ static Config& cfg_impl() {
                 pc.off     = e.value("off", 0);
                 pc.op      = e.value("op", std::string());
                 pc.size    = e.value("size", 4);
+                pc.len     = e.value("len", 4);
                 if (!pc.name.empty() && !pc.pattern.empty())
                     c.patterns.push_back(std::move(pc));
             }

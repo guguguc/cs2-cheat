@@ -26,6 +26,7 @@ if(Vulkan_FOUND AND X11_FOUND)
         src/process.cpp
         src/aimbot.cpp
         src/trigger.cpp
+        src/bvh.cpp
     )
     target_include_directories(cs2_internal PRIVATE src internal)
     # -fcf-protection: gives our detours endbr64 prologues so indirect

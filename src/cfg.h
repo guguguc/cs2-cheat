@@ -10,6 +10,7 @@ struct PatternCfg {
     int off = 0;
     std::string op;  // "read" | "abs4" | "abs5"
     int size = 4;    // Read op: 1 (disp8) or 4 (disp32)
+    int len = 4;     // Abs op: instruction length after the disp (RIP-relative)
 };
 
 struct OffsetCfg {
