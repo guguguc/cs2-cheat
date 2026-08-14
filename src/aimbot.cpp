@@ -42,6 +42,17 @@ bool read_aim_punch(const Game& game, const Memory& mem, Vector3& out) {
 }
 
 Vector3 g_prev_punch{};
+std::uintptr_t g_locked_target = 0;  // deadlocked target lock: keep until invalid
+
+// deadlocked distance_scale: far targets get a tight FOV, close ones wider.
+float distance_scale(float distance) {
+    if (distance > 500.f) return 1.0f;
+    return 5.0f - distance / 125.0f;
+}
+
+bool is_sniper(const std::string& name) {
+    return name == "awp" || name == "g3sg1" || name == "scar20" || name == "ssg08";
+}
 
 }  // namespace
 
@@ -54,31 +65,51 @@ bool run_aimbot(Game& game, const Memory& mem, bool enabled,
     if (!local.alive) return false;
     const Vector3 eye = game.local_eye(mem);
 
+    // Target selection (deadlocked): pick the enemy with the smallest angle
+    // to the crosshair, within a distance-adaptive FOV cone. Re-evaluated
+    // every frame, so moving the crosshair onto another enemy switches to it.
     const Player* best = nullptr;
-    float best_angle = fov_deg;
-    for (const auto& p : game.players()) {
-        if (!p.valid || !p.alive || p.local) continue;
-        if (p.team == local.team) continue;
-        if (p.distance_m > cfg::AIM_MAX_DISTANCE_M) continue;
-
-        const Vector3 target = CalcAngle(eye, p.head);
-        const float dist = AngleDistance(target, game.view_angles());
-        if (dist < best_angle) {
-            best_angle = dist;
-            best = &p;
+    {
+        float best_angle = fov_deg * distance_scale(1.f);
+        for (const auto& p : game.players()) {
+            if (!p.valid || !p.alive || p.local) continue;
+            if (p.team == local.team) continue;
+            if (p.distance_m > cfg::AIM_MAX_DISTANCE_M) continue;
+            const Vector3 target = CalcAngle(eye, p.head);
+            const float dist = AngleDistance(target, game.view_angles());
+            const float limit = fov_deg * distance_scale(p.distance_m);
+            if (dist <= limit && dist < best_angle) {
+                best_angle = dist;
+                best = &p;
+            }
         }
     }
-    if (!best) return false;
+    // Target switch: reset recoil state so the previous weapon's punch does
+    // not leak onto the new target (deadlocked resets with the target).
+    if (!best || (g_locked_target && best->address != g_locked_target)) {
+        g_prev_punch = {};
+    }
+    if (!best) {
+        g_locked_target = 0;
+        return false;
+    }
+    g_locked_target = best->address;
 
     // --- recoil compensation (deadlocked) ---
     Vector3 punch{};
     const bool have_punch = read_aim_punch(game, mem, punch);
     const int shots =
         mem.read<int>(game.local_pawn() + cs2cfg().offsets.m_iShotsFired).value_or(0);
-    Vector3 eff = punch * 2.0f;  // engine stores half the real punch
-    if (have_punch && eff.Length() == 0.f && shots > 1) {
-        // Punch cleared mid-spray: keep compensating with the last known value.
-        eff = g_prev_punch;
+    const std::string wname = game.weapon_name(mem);
+    Vector3 eff{};
+    if (is_sniper(wname)) {
+        eff = {};  // snipers: no recoil compensation (deadlocked)
+    } else {
+        eff = punch * 2.0f;  // engine stores half the real punch
+        if (have_punch && eff.Length() == 0.f && shots > 1) {
+            // Punch cleared mid-spray: keep compensating with the last known value.
+            eff = g_prev_punch;
+        }
     }
     g_prev_punch = eff;
 

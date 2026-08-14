@@ -7,6 +7,7 @@
 #include "overlay_ctx.h"
 #include "patterns.h"
 #include "process.h"
+#include "process.h"
 #include "trigger.h"
 #include "uinput_aim.h"
 #include "vk_hook.h"
@@ -47,6 +48,34 @@ void log_(const char* fmt, ...) {
     std::fclose(f);
 }
 
+// Scans the ICvar convar list for "sensitivity" (deadlocked-style).
+// libtier0.so exports VEngineCvar007 (interface table at base + kCvarIfaceOff);
+// each convar object has a name pointer at +0x0 and its float value at +0x58.
+std::uintptr_t find_sensitivity_convar(const Memory& mem) {
+    const auto tier0 = module_base(mem.pid(), "libtier0.so");
+    if (!tier0) { log_("convar: no libtier0\n"); return 0; }
+    constexpr std::uintptr_t kCvarIfaceOff = 1423200;  // VEngineCvar007 (dumper 2026-08-13)
+    const auto iface = mem.read<std::uintptr_t>(*tier0 + kCvarIfaceOff).value_or(0);
+    if (!iface) { log_("convar: no cvar interface\n"); return 0; }
+    const auto objects = mem.read<std::uintptr_t>(iface + 0x50).value_or(0);
+    const std::uint32_t count = mem.read<std::uint32_t>(iface + 160).value_or(0);
+    if (!objects || !count) { log_("convar: empty list (count=%u)\n", count); return 0; }
+    for (std::uint32_t i = 0; i < count && i < 4096; ++i) {
+        const auto obj = mem.read<std::uintptr_t>(objects + i * 16).value_or(0);
+        if (!obj) break;
+        const auto name_addr = mem.read<std::uintptr_t>(obj).value_or(0);
+        if (!name_addr) continue;
+        char buf[32] = {0};
+        mem.read(name_addr, buf, sizeof(buf) - 1);
+        if (std::string(buf) == "sensitivity") {
+            log_("convar: sensitivity at 0x%llx\n", static_cast<unsigned long long>(obj));
+            return obj;
+        }
+    }
+    log_("convar: sensitivity not found (count=%u)\n", count);
+    return 0;
+}
+
 void data_thread() {
     log_("data_thread: start\n");
     Memory mem;
@@ -80,6 +109,7 @@ void data_thread() {
     if (input_obj) {
         game.set_view_angle_source(input_obj + cs2cfg().offsets.viewAngleOffset);  // real view angles
         uinput_aim::set_input_obj(input_obj);
+        uinput_aim::set_sensitivity_convar(find_sensitivity_convar(mem));
         // Create the virtual device lazily on first aim (in-match, so it never
         // collides with the game's raw-input init) and keep it alive (no
         // destroy -> no pointer-warp self-move on release).
@@ -101,6 +131,8 @@ void data_thread() {
             g_ctx.snap = game.snapshot();
             g_ctx.valid = game.local_pawn() != 0;
         }
+
+        uinput_aim::set_local_pawn(game.local_pawn());
 
         bool aim = false, trig = false;
         float fov = 12.f, sm = 6.f;

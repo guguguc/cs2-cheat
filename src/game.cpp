@@ -226,6 +226,29 @@ std::uintptr_t Game::entity_list() const {
     return entity_list_;
 }
 
+std::string Game::weapon_name(const Memory& mem) const {
+    // pawn -> m_pWeaponServices -> m_hActiveWeapon (handle)
+    const std::uintptr_t pawn = local_pawn_;
+    if (!pawn) return {};
+    const auto ws = mem.read<std::uintptr_t>(pawn + cs2cfg().offsets.m_pWeaponServices);
+    if (!ws || !*ws) return {};
+    const auto handle = mem.read<int>(*ws + cs2cfg().offsets.m_hActiveWeapon);
+    if (!handle || *handle <= 0) return {};
+    // handle -> entity (CEntityInstance), +0x10 -> CEntityIdentity, +0x20 -> m_designerName
+    const std::uintptr_t ent = entity_by_handle(mem, *handle);
+    if (!ent) return {};
+    const auto identity = mem.read<std::uintptr_t>(ent + 0x10);
+    if (!identity || !*identity) return {};
+    const auto name_ptr = mem.read<std::uintptr_t>(*identity + cs2cfg().offsets.m_designerName);
+    if (!name_ptr || !*name_ptr) return {};
+    char buf[64] = {0};
+    mem.read(*name_ptr, buf, sizeof(buf) - 1);
+    std::string name(buf);
+    // strip "weapon_" prefix (deadlocked does name.replace("weapon_", ""))
+    if (name.rfind("weapon_", 0) == 0) name = name.substr(7);
+    return name;
+}
+
 std::uintptr_t Game::entity_by_index_impl(const Memory& mem, int index) const {
     if (!entity_list_ || index < 0) return 0;
     const int chunk = index / offsets::ENTITY_LIST_CHUNK_SIZE;

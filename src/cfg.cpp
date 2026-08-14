@@ -93,6 +93,10 @@ static Config& cfg_impl() {
             set("m_pAimPunchServices", c.offsets.m_pAimPunchServices);
             set("aimPunchCache", c.offsets.aimPunchCache);
             set("m_iShotsFired", c.offsets.m_iShotsFired);
+            set("m_pWeaponServices", c.offsets.m_pWeaponServices);
+            set("m_flFOVSensitivityAdjust", c.offsets.m_flFOVSensitivityAdjust);
+            set("m_hActiveWeapon", c.offsets.m_hActiveWeapon);
+            set("m_designerName", c.offsets.m_designerName);
             set("m_pGameSceneNode", c.offsets.m_pGameSceneNode);
             set("m_modelState", c.offsets.m_modelState);
             set("boneStateData", c.offsets.boneStateData);

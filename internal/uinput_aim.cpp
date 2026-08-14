@@ -1,10 +1,12 @@
 #include "uinput_aim.h"
 #include "cfg.h"
+#include "overlay_ctx.h"
 
 #include <fcntl.h>
 #include <linux/uinput.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cmath>
 #include <cstdarg>
@@ -26,17 +28,34 @@ void log_(const char* fmt, ...) {
 
 int g_fd = -1;
 std::uintptr_t g_input_obj = 0;
+std::uintptr_t g_sens_convar = 0;  // live "sensitivity" convar (+0x58 = float value)
+std::uintptr_t g_local_pawn = 0;   // for m_flFOVSensitivityAdjust (zoom sens scale)
 bool g_firing = false;
 std::uint64_t g_move_log = 0;
+// deadlocked-style inertia low-pass filter for the mouse movement.
+float g_inertia_dx = 0.f;
+float g_inertia_dy = 0.f;
 
-// Game sensitivity: counts per degree = 1 / (sensitivity * 0.022). The 0.022
-// is m_yaw (default). Sensitivity comes from the JSON config.
-float counts_per_deg() { return 1.0f / (cs2cfg().offsets.sensitivity * 0.022f); }
-// Movement: move this fraction of the remaining angle error per frame, capped
-// at kMaxPerFrame counts so far targets snap fast but not instantly.
-constexpr float kFracPerFrame = 0.5f;
-constexpr int kMaxPerFrame = 180;
 constexpr float kLockDeg = 1.2f;  // fire when residual error is below this
+
+// Live sensitivity: convar "sensitivity" (+0x58), defaulting to the config
+// value; multiplied by the pawn's m_flFOVSensitivityAdjust (zoom scaling),
+// exactly like deadlocked's get_sensitivity() * fov_multiplier().
+float live_sensitivity() {
+    float sens = cs2cfg().offsets.sensitivity;
+    if (g_sens_convar) {
+        const float v = *reinterpret_cast<const float*>(g_sens_convar + 0x58);
+        if (v > 0.01f) sens = v;
+    }
+    if (g_local_pawn) {
+        const float fm = *reinterpret_cast<const float*>(
+            g_local_pawn + cs2cfg().offsets.m_flFOVSensitivityAdjust);
+        if (fm > 0.01f) sens *= fm;
+    }
+    return sens;
+}
+// deadlocked: 1 / (sensitivity * 0.022) = counts per degree.
+float counts_per_deg(float sens) { return 1.0f / (sens * 0.022f); }
 
 void move_counts(int dx, int dy) {
     if (g_fd < 0) return;
@@ -94,11 +113,13 @@ bool init() {
         return false;
     }
     log_("uinput: virtual mouse created (sens %.1f, %.3f counts/deg)\n",
-         cs2cfg().offsets.sensitivity, counts_per_deg());
+         cs2cfg().offsets.sensitivity, counts_per_deg(cs2cfg().offsets.sensitivity));
     return true;
 }
 
 void set_input_obj(std::uintptr_t input_obj) { g_input_obj = input_obj; }
+void set_sensitivity_convar(std::uintptr_t addr) { g_sens_convar = addr; }
+void set_local_pawn(std::uintptr_t pawn) { g_local_pawn = pawn; }
 
 void move_to(float target_pitch, float target_yaw) {
     // Lazily create the virtual mouse on first use (the user is aiming), so
@@ -115,22 +136,29 @@ void move_to(float target_pitch, float target_yaw) {
     float d_yaw = target_yaw - cur_yaw;
     while (d_yaw > 180.f) d_yaw -= 360.f;
     while (d_yaw < -180.f) d_yaw += 360.f;
-    const float d_pitch = target_pitch - cur_pitch;
+    float d_pitch = target_pitch - cur_pitch;
+    // deadlocked vec2_clamp: keep pitch within +-89 so we never flip past
+    // straight-up/down.
+    if (d_pitch > 89.f) d_pitch = 89.f;
+    if (d_pitch < -89.f) d_pitch = -89.f;
     const float err = std::sqrt(d_pitch * d_pitch + d_yaw * d_yaw);
 
-    // Source convention: mouse right (-x) turns right = yaw decreases; mouse
-    // down (+y) looks down = pitch increases. Flip signs if inverted.
-    const float cpd = counts_per_deg();
-    int dx = static_cast<int>(-d_yaw * kFracPerFrame * cpd);
-    int dy = static_cast<int>(d_pitch * kFracPerFrame * cpd);
-    if (dx > kMaxPerFrame) dx = kMaxPerFrame;
-    if (dx < -kMaxPerFrame) dx = -kMaxPerFrame;
-    if (dy > kMaxPerFrame) dy = kMaxPerFrame;
-    if (dy < -kMaxPerFrame) dy = -kMaxPerFrame;
+    // deadlocked movement: angle error -> counts (45.45 = 1/0.022), divided by
+    // (smooth+1), then an inertia low-pass filter so the crosshair glides
+    // instead of jumping. Live sensitivity includes the zoom multiplier.
+    const float cpd = counts_per_deg(live_sensitivity());
+    const float smooth = std::clamp(g_ctx.aim_smooth, 1.f, 20.f);
+    const float target_dx = -d_yaw * cpd / (smooth + 1.f);
+    const float target_dy = d_pitch * cpd / (smooth + 1.f);
+    g_inertia_dx += (target_dx - g_inertia_dx) * 0.5f;
+    g_inertia_dy += (target_dy - g_inertia_dy) * 0.5f;
+    int dx = static_cast<int>(g_inertia_dx);
+    int dy = static_cast<int>(g_inertia_dy);
     if (dx == 0 && dy == 0) return;
     ++g_move_log;
-    log_("uinput: steer #%llu dx=%d dy=%d\n",
-         static_cast<unsigned long long>(g_move_log), dx, dy);
+    if ((g_move_log & 0x3F) == 0)  // log every 64th steer to avoid spam
+        log_("uinput: steer #%llu dx=%d dy=%d\n",
+             static_cast<unsigned long long>(g_move_log), dx, dy);
     move_counts(dx, dy);
 
     // Auto-fire when locked onto the target.

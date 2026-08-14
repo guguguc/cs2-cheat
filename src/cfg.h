@@ -20,7 +20,11 @@ struct OffsetCfg {
     std::uintptr_t m_iIDEntIndex      = 0x42C4;
     std::uintptr_t m_pAimPunchServices = 0x1440;   // C_CSPlayerPawn -> CCSPlayer_AimPunchServices
     std::uintptr_t aimPunchCache      = 0x88;      // CCSPlayer_AimPunchServices::m_aimPunchCache (CUtlVector<QAngle>)
-    std::uintptr_t m_iShotsFired      = 0x2B1C;    // C_CSPlayerPawn::m_iShotsFired
+    std::uintptr_t m_iShotsFired      = 0x2B14;    // C_CSPlayerPawn::m_iShotsFired (dumper 2026-08-13)
+    std::uintptr_t m_flFOVSensitivityAdjust = 0x1338; // C_BasePlayerPawn::m_flFOVSensitivityAdjust (f32)
+    std::uintptr_t m_pWeaponServices  = 0x1190;    // C_BasePlayerPawn::m_pWeaponServices
+    std::uintptr_t m_hActiveWeapon    = 0x60;      // CPlayer_WeaponServices::m_hActiveWeapon (handle)
+    std::uintptr_t m_designerName     = 0x20;      // CEntityIdentity::m_designerName (PtrCStr)
     // ---- bone chain (Linux, verified by scripts/scan_bones.py) -------------
     std::uintptr_t m_pGameSceneNode   = 0x4A0;     // C_BaseEntity::m_pGameSceneNode
     std::uintptr_t m_modelState       = 0x140;     // CSkeletonInstance::m_modelState (EMBEDDED CModelState)

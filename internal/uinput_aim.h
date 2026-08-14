@@ -10,6 +10,8 @@ namespace uinput_aim {
 
 bool init();                                   // create the virtual mouse
 void set_input_obj(std::uintptr_t input_obj);  // for reading live view angles
+void set_sensitivity_convar(std::uintptr_t addr);  // live "sensitivity" convar (+0x58 = float)
+void set_local_pawn(std::uintptr_t pawn);      // for reading m_flFOVSensitivityAdjust
 void move_to(float target_pitch, float target_yaw);  // steer toward angle
 void set_fire(bool on);                            // virtual left-click
 void flush();                                      // send a neutral (0,0)+SYN

@@ -69,6 +69,14 @@ public:
     Vector3 local_eye(const Memory& mem) const;
     bool set_view_angles(const Memory& mem, const Vector3& ang) const;
 
+    // Resolve a weapon handle -> entity address (handle & 0xFFF -> entity list).
+    std::uintptr_t entity_by_handle(const Memory& mem, int handle) const {
+        if (handle <= 0) return 0;
+        return entity_by_index(mem, handle & 0xFFF);
+    }
+    // Reads the local player's active weapon designer name (e.g. "weapon_awp").
+    std::string weapon_name(const Memory& mem) const;
+
     // Triggerbot support (resolve an arbitrary entity index).
     std::uintptr_t entity_by_index(const Memory& mem, int index) const;
     int entity_team(const Memory& mem, std::uintptr_t ent) const;
