@@ -123,6 +123,10 @@ bool run_aimbot(Game& game, const Memory& mem, bool enabled,
         return false;
     }
     g_locked_target = best->address;
+    {
+        std::lock_guard<std::mutex> lk(g_ctx.mtx);
+        g_ctx.aim_target_world = best->head;  // hint box follows this target
+    }
 
     // --- recoil compensation (deadlocked) ---
     Vector3 punch{};

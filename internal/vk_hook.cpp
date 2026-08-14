@@ -73,6 +73,7 @@ void log_(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 extern "C" VkResult detour_create_swapchain_game(VkDevice, const VkSwapchainCreateInfoKHR*,
                                                  const VkAllocationCallbacks*, VkSwapchainKHR*);
 bool init_render(VkQueue queue);
+void apply_modern_theme();  // defined below; sets the translucent dark theme once
 
 hook64::Hook h_present;
 hook64::Hook h_create_device;
@@ -341,6 +342,49 @@ PFN_vkVoidFunction imgui_loader(const char* name, void*) {
     return reinterpret_cast<PFN_vkVoidFunction>(dlsym(RTLD_DEFAULT, name));
 }
 
+void apply_modern_theme() {
+    ImGui::StyleColorsDark();
+    ImGuiStyle& st = ImGui::GetStyle();
+    st.WindowRounding = 10.f;
+    st.ChildRounding = 6.f;
+    st.FrameRounding = 6.f;
+    st.GrabRounding = 6.f;
+    st.PopupRounding = 8.f;
+    st.ScrollbarRounding = 6.f;
+    st.WindowBorderSize = 2.f;   // thicker border so the shadow reads
+    st.FrameBorderSize = 0.f;
+    st.WindowPadding = ImVec2(14.f, 12.f);
+    st.FramePadding = ImVec2(8.f, 5.f);
+    st.ItemSpacing = ImVec2(8.f, 7.f);
+
+    ImVec4* c = st.Colors;
+    const ImVec4 bg(0.0f, 0.0f, 0.0f, 1.0f);  // opaque black
+    const ImVec4 green(0.25f, 0.95f, 0.60f, 1.f);
+    c[ImGuiCol_WindowBg] = bg;
+    c[ImGuiCol_ChildBg] = ImVec4(0.10f, 0.11f, 0.16f, 0.50f);
+    c[ImGuiCol_PopupBg] = bg;
+    c[ImGuiCol_Border] = ImVec4(0.25f, 0.95f, 0.60f, 0.55f);  // green glow border
+    c[ImGuiCol_BorderShadow] = ImVec4(0.f, 0.f, 0.f, 0.60f);   // soft dark edge
+    c[ImGuiCol_FrameBg] = ImVec4(1.f, 1.f, 1.f, 0.07f);
+    c[ImGuiCol_FrameBgHovered] = ImVec4(1.f, 1.f, 1.f, 0.12f);
+    c[ImGuiCol_FrameBgActive] = ImVec4(green.x, green.y, green.z, 0.18f);
+    c[ImGuiCol_CheckMark] = green;
+    c[ImGuiCol_SliderGrab] = ImVec4(green.x, green.y, green.z, 0.9f);
+    c[ImGuiCol_SliderGrabActive] = ImVec4(0.35f, 1.f, 0.70f, 1.f);
+    c[ImGuiCol_Header] = ImVec4(green.x, green.y, green.z, 0.15f);
+    c[ImGuiCol_HeaderHovered] = ImVec4(green.x, green.y, green.z, 0.25f);
+    c[ImGuiCol_HeaderActive] = ImVec4(green.x, green.y, green.z, 0.35f);
+    c[ImGuiCol_Text] = ImVec4(0.90f, 0.92f, 0.95f, 1.f);
+    c[ImGuiCol_TextDisabled] = ImVec4(0.55f, 0.58f, 0.65f, 1.f);
+    c[ImGuiCol_Button] = ImVec4(green.x, green.y, green.z, 0.15f);
+    c[ImGuiCol_ButtonHovered] = ImVec4(green.x, green.y, green.z, 0.30f);
+    c[ImGuiCol_ButtonActive] = ImVec4(green.x, green.y, green.z, 0.45f);
+    c[ImGuiCol_ScrollbarBg] = ImVec4(0.02f, 0.02f, 0.04f, 0.60f);
+    c[ImGuiCol_ScrollbarGrab] = ImVec4(1.f, 1.f, 1.f, 0.25f);
+    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(1.f, 1.f, 1.f, 0.35f);
+    c[ImGuiCol_ScrollbarGrabActive] = green;
+}
+
 bool init_render(VkQueue queue) {
     if (!g_device || g_swapchain == VK_NULL_HANDLE || g_format == VK_FORMAT_UNDEFINED)
         return false;
@@ -427,7 +471,7 @@ bool init_render(VkQueue queue) {
     // --- ImGui ----------------------------------------------------------------
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGui::StyleColorsDark();
+    apply_modern_theme();
     // The game hides the OS cursor (FPS), so ImGui must draw its own so the
     // menu is usable.
     ImGui::GetIO().MouseDrawCursor = true;

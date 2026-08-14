@@ -93,8 +93,22 @@ void esp(SharedCtx& ctx, const ImVec2& display) {
 void aim_hint(SharedCtx& ctx, const ImVec2& display) {
     if (!ctx.aim_active || ctx.panel_open) return;
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
-    const char* text = "AIMBOT ON";
+    const int sw = static_cast<int>(display.x);
+    const int sh = static_cast<int>(display.y);
+
+    // Translucent box from the crosshair (screen center) toward the locked
+    // target's screen position; updates every frame as the aimbot steers.
+    Vector2 tscr;
+    if (WorldToScreen(ctx.aim_target_world, ctx.snap.view_matrix, sw, sh, tscr)) {
+        const ImVec2 c{display.x * 0.5f, display.y * 0.5f};
+        const ImVec2 lo{std::min(c.x, tscr.x), std::min(c.y, tscr.y)};
+        const ImVec2 hi{std::max(c.x, tscr.x), std::max(c.y, tscr.y)};
+        dl->AddRectFilled(lo, hi, IM_COL32(0, 255, 120, 46));
+        dl->AddRect(lo, hi, IM_COL32(0, 255, 120, 160), 0.f, 0, 1.5f);
+    }
+
     // Big transparent text, centered just below the crosshair.
+    const char* text = "AIMBOT ON";
     ImFont* font = ImGui::GetIO().Fonts->Fonts.empty()
                        ? nullptr
                        : ImGui::GetIO().Fonts->Fonts.back();
@@ -112,34 +126,68 @@ void aim_hint(SharedCtx& ctx, const ImVec2& display) {
 
 void panel(SharedCtx& ctx) {
     if (!ctx.panel_open) return;
-    ImGui::SetNextWindowPos({12.f, 12.f}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("cs2-internal", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
 
+    ImGui::SetNextWindowPos({16.f, 16.f}, ImGuiCond_FirstUseEver);
+    ImGui::Begin("cs2-internal", nullptr,
+                 ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse |
+                     ImGuiWindowFlags_NoTitleBar);  // no title bar
+
+    // ---- header ----
+    ImGui::PushFont(ImGui::GetIO().Fonts->Fonts.empty() ? nullptr
+                     : ImGui::GetIO().Fonts->Fonts.back());
+    ImGui::TextColored(ImVec4(0.25f, 0.95f, 0.60f, 1.f), "CS2 INTERNAL");
+    ImGui::PopFont();
+    ImGui::TextDisabled("cheat menu · F1 to close");
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    // ---- toggles ----
     ImGui::Checkbox("ESP", &ctx.esp_on);
     {
         const bool prev = ctx.aim_on;
         ImGui::Checkbox("Aimbot", &ctx.aim_on);
-        if (ctx.aim_on != prev) ctx.aim_toggle = ctx.aim_on;  // menu syncs hotkey state
+        if (ctx.aim_on != prev) ctx.aim_toggle = ctx.aim_on;
     }
-    if (ctx.aim_on)
+    if (ctx.aim_on) {
+        ImGui::Indent(18.f);
         ImGui::Checkbox("Visibility check", &ctx.visibility_check);
+        ImGui::Unindent(18.f);
+    }
     ImGui::Checkbox("Triggerbot", &ctx.trigger_on);
-    if (ctx.trigger_on)
+    if (ctx.trigger_on) {
+        ImGui::Indent(18.f);
         ImGui::Checkbox("Head only", &ctx.trigger_head_only);
+        ImGui::Unindent(18.f);
+    }
 
+    ImGui::Spacing();
     ImGui::Separator();
+    ImGui::Spacing();
+
+    // ---- sliders ----
+    ImGui::TextDisabled("AIM SETTINGS");
     ImGui::SliderFloat("FOV (deg)", &ctx.aim_fov, 1.f, 60.f, "%.1f");
     ImGui::SliderFloat("Smooth", &ctx.aim_smooth, 1.f, 30.f, "%.1f");
     ImGui::SliderFloat("Max dist (m)", &ctx.esp_max_dist, 10.f, 400.f, "%.0f");
 
+    ImGui::Spacing();
     ImGui::Separator();
-    ImGui::TextDisabled("game: %s", ctx.valid ? "connected - in match" : "not in match");
+    ImGui::Spacing();
+
+    // ---- status ----
+    const bool in_match = ctx.valid;
+    const char* status = in_match ? "IN MATCH" : "MENU / LOBBY";
+    const ImVec4 status_col = in_match ? ImVec4(0.25f, 0.95f, 0.60f, 1.f)
+                                       : ImVec4(0.95f, 0.60f, 0.25f, 1.f);
+    ImGui::TextColored(status_col, "● %s", status);
     int enemies = 0;
     for (const Player& p : ctx.snap.players) {
         if (p.valid && p.alive && p.team != ctx.snap.local.team) ++enemies;
     }
     ImGui::TextDisabled("enemies: %d", enemies);
-    ImGui::TextDisabled("press F1 to close menu");
+    ImGui::TextDisabled("aim: %s", ctx.aim_active ? "locking" : "idle");
+
     ImGui::End();
 }
 
