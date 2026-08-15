@@ -2,8 +2,8 @@
 
 #include "cfg.h"
 #include "config.h"
+#include "mouse_device.h"
 #include "overlay_ctx.h"
-#include "uinput_aim.h"
 
 #include <cmath>
 #include <cstdio>
@@ -16,11 +16,11 @@
 //     enemy's head bone before firing
 //   - fires with a random 100-200ms delay (normal distribution), holds the
 //     button for `shot_duration` ms, via the shared uinput virtual mouse.
-void Triggerbot::run(Game& game, const Memory& mem, bool enabled, bool& fire_now) {
+void Triggerbot::run(bool enabled, bool& fire_now) {
     fire_now = false;
-    if (!enabled || !game.attached() || !game.local_pawn()) {
+    if (!enabled || !game_.attached() || !game_.local_pawn()) {
         // Force-release if the bot was mid-shot when disabled.
-        if (firing_) { uinput_aim::set_fire(false); firing_ = false; }
+        if (firing_) { g_mouse.set_fire(false); firing_ = false; }
         shot_pending_ = false;
         shot_start_ = {};
         return;
@@ -31,31 +31,34 @@ void Triggerbot::run(Game& game, const Memory& mem, bool enabled, bool& fire_now
     // Shot in progress: drive the button release.
     if (firing_) {
         if (now >= shot_end_) {
-            uinput_aim::set_fire(false);
+            g_mouse.set_fire(false);
             firing_ = false;
         }
         return;
     }
     if (shot_pending_) return;  // already scheduled; run_shoot() fires it
 
-    const Player& local = game.local();
+    const Player& local = game_.local();
     if (!local.alive) return;
 
     // --- flash check (deadlocked: is_flashed > 0.2) ---
-    const auto flash = mem.read<float>(game.local_pawn() + cs2cfg().offsets.m_flFlashOverlayAlpha);
+    const auto flash = game_.memory().read<float>(
+        game_.local_pawn() + Config::instance().offsets.m_flFlashOverlayAlpha);
     if (flash && *flash > 0.2f) return;
 
     // --- velocity check (deadlocked default threshold 100) ---
-    const auto vel = mem.read<Vector3>(game.local_pawn() + cs2cfg().offsets.m_vecVelocity);
+    const auto vel = game_.memory().read<Vector3>(
+        game_.local_pawn() + Config::instance().offsets.m_vecVelocity);
     if (vel && vel->Length() > cfg::TRIGGER_VELOCITY_THRESHOLD) return;
 
     // --- crosshair entity (m_iIDEntIndex) ---
-    const auto idx = mem.read<int>(game.local_pawn() + cs2cfg().offsets.m_iIDEntIndex);
+    const auto idx = game_.memory().read<int>(
+        game_.local_pawn() + Config::instance().offsets.m_iIDEntIndex);
     if (!idx || *idx <= 0) return;
-    const std::uintptr_t ent = game.entity_by_index(mem, *idx);
-    if (!ent || ent == game.local_pawn()) return;
-    if (game.entity_team(mem, ent) == local.team) return;  // no friendlies
-    const int hp = game.entity_health(mem, ent);
+    const std::uintptr_t ent = game_.entity_by_index(*idx);
+    if (!ent || ent == game_.local_pawn()) return;
+    if (game_.entity_team(ent) == local.team) return;  // no friendlies
+    const int hp = game_.entity_health(ent);
     if (hp <= 0 || hp > 100) return;
 
     // --- head_only: crosshair must be near the head bone (distance-scaled).
@@ -67,13 +70,13 @@ void Triggerbot::run(Game& game, const Memory& mem, bool enabled, bool& fire_now
     }
     if (head_only) {
         Vector3 head{};
-        if (!game.read_bone(mem, ent, cs2cfg().offsets.boneHeadIndex, head)) return;
-        const Vector3 eye = game.local_eye(mem);
+        if (!game_.read_bone(ent, Config::instance().offsets.boneHeadIndex, head)) return;
+        const Vector3 eye = game_.local_eye();
         const float dist = (head - eye).Length();
         if (dist < 1.f) return;
         // angle between view and head direction
         const Vector3 dir = (head - eye) / dist;
-        const Vector3 vfwd = game.view_forward();
+        const Vector3 vfwd = game_.view_forward();
         const float dot = vfwd.x * dir.x + vfwd.y * dir.y + vfwd.z * dir.z;
         const float fov = std::acos(std::clamp(dot, -1.f, 1.f)) * 57.29578f;
         const float head_radius_fov = 3.5f / dist * 100.0f;
@@ -97,7 +100,7 @@ void Triggerbot::run_shoot() {
     if (firing_) return;
     if (!shot_pending_) return;
     if (now >= shot_start_) {
-        uinput_aim::set_fire(true);
+        g_mouse.set_fire(true);
         firing_ = true;
         shot_pending_ = false;
         shot_start_ = {};

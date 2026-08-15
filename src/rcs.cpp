@@ -3,7 +3,7 @@
 #include "cfg.h"
 #include "config.h"
 #include "math.h"
-#include "uinput_aim.h"
+#include "mouse_device.h"
 
 #include <algorithm>
 #include <cmath>
@@ -69,13 +69,13 @@ void record_accel(std::deque<Vector2>& h, const Vector2& v) {
 
 }  // namespace
 
-void Rcs::run(Game& game, const Memory& mem, bool enabled, float strength) {
-    if (!enabled || !game.attached() || !game.local_pawn()) return;
-    const Player& local = game.local();
+void Rcs::run(bool enabled, float strength) {
+    if (!enabled || !game_.attached() || !game_.local_pawn()) return;
+    const Player& local = game_.local();
     if (!local.alive) return;
 
     // Weapon filter (deadlocked): skip Unknown/Knife/Grenade/Pistol/Shotgun.
-    const std::string wname = game.weapon_name(mem);
+    const std::string wname = game_.weapon_name();
     if (wname.empty()) return;
     if (wname == "knife" || wname == "knife_t" || wname == "bayonet" ||
         wname.rfind("knife_", 0) == 0 || wname.find("grenade") != std::string::npos ||
@@ -91,21 +91,23 @@ void Rcs::run(Game& game, const Memory& mem, bool enabled, float strength) {
 
     // Aim punch (read_aim_punch equivalent): pawn -> services -> cache -> last.
     Vector3 punch{};
-    const std::uintptr_t pawn = game.local_pawn();
+    const std::uintptr_t pawn = game_.local_pawn();
     if (!pawn) return;
-    const auto services = mem.read<std::uintptr_t>(pawn + cs2cfg().offsets.m_pAimPunchServices);
+    const auto services = game_.memory().read<std::uintptr_t>(
+        pawn + Config::instance().offsets.m_pAimPunchServices);
     if (!services || !*services) return;
-    const auto len = mem.read<std::int32_t>(*services + cs2cfg().offsets.aimPunchCache);
+    const auto len = game_.memory().read<std::int32_t>(
+        *services + Config::instance().offsets.aimPunchCache);
     if (!len || *len < 1) return;
-    const auto data =
-        mem.read<std::uintptr_t>(*services + cs2cfg().offsets.aimPunchCache + 0x08);
+    const auto data = game_.memory().read<std::uintptr_t>(
+        *services + Config::instance().offsets.aimPunchCache + 0x08);
     if (!data || !*data) return;
-    const auto p3 = mem.read<Vector3>(*data + (*len - 1) * 12);
+    const auto p3 = game_.memory().read<Vector3>(*data + (*len - 1) * 12);
     if (!p3) return;
     punch = *p3;
 
     const int shots =
-        mem.read<int>(pawn + cs2cfg().offsets.m_iShotsFired).value_or(0);
+        game_.memory().read<int>(pawn + Config::instance().offsets.m_iShotsFired).value_or(0);
 
     // deadlocked: sniper -> no punch; zero punch mid-spray -> keep previous.
     Vector2 aim_punch{};
@@ -124,7 +126,7 @@ void Rcs::run(Game& game, const Memory& mem, bool enabled, float strength) {
         return;
     }
 
-    const float sens = uinput_aim::live_sensitivity();
+    const float sens = g_mouse.live_sensitivity();
     if (sens <= 0.01f) return;
 
     // mouse_angle: punch DELTA converted to mouse counts (deadlocked formula).
@@ -158,5 +160,5 @@ void Rcs::run(Game& game, const Memory& mem, bool enabled, float strength) {
 
     const int dx = static_cast<int>(ready.x);
     const int dy = static_cast<int>(ready.y);
-    if (dx != 0 || dy != 0) uinput_aim::move_counts_raw(dx, dy);
+    if (dx != 0 || dy != 0) g_mouse.move_counts_raw(dx, dy);
 }

@@ -3,6 +3,7 @@
 #include "game.h"
 #include "input_x11.h"
 #include "memory.h"
+#include "mouse_device.h"
 #include "offsets.h"
 #include "overlay_ctx.h"
 #include "rcs.h"
@@ -10,7 +11,6 @@
 #include "process.h"
 #include "process.h"
 #include "trigger.h"
-#include "uinput_aim.h"
 #include "vk_hook.h"
 
 #include <X11/Xlib.h>
@@ -88,9 +88,7 @@ std::string read_cstr(const Memory& mem, std::uintptr_t addr) {
     return std::string(buf);
 }
 
-std::uintptr_t s_bvh_world = 0;
-
-void check_bvh(const Memory& mem, const patterns::Resolved& off) {
+void check_bvh(Aimbot& aimbot, const Memory& mem, const patterns::Resolved& off) {
     static std::string last_map;
     static auto last_check = std::chrono::steady_clock::now();
     if (std::chrono::steady_clock::now() - last_check < std::chrono::milliseconds(200)) return;
@@ -102,33 +100,33 @@ void check_bvh(const Memory& mem, const patterns::Resolved& off) {
     const std::string map = read_cstr(mem, name_ptr);
     if (map == last_map) return;
     last_map = map;
-    if (aimbot_init_bvh(mem, off.vphysWorld, /*force=*/true)) {
+    if (aimbot.init_bvh(off.vphysWorld, /*force=*/true)) {
         // loaded ok (fresh geometry for the new map)
     } else {
         last_map.clear();  // failed: retry next 200 ms cycle
     }
-    (void)s_bvh_world;
 }
 
 void data_thread() {
     log_("data_thread: start\n");
     Memory mem;
     mem.attach(getpid());
-    patterns::Resolved off;
-    if (!patterns::resolve(getpid(), off)) {
+    patterns::OffsetResolver offsets;
+    if (!offsets.attach(getpid())) {
         log_("entry: pattern resolve failed; retrying in background\n");
-        for (int i = 0; i < 20 && !off.ok; ++i) {
+        for (int i = 0; i < 20 && !offsets.ok(); ++i) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
-            patterns::resolve(getpid(), off);
+            offsets.attach(getpid());
         }
     }
-    if (!off.ok) {
+    if (!offsets.ok()) {
         g_thread_done.store(true);
         return;
     }
+    const patterns::Resolved& off = offsets.resolved();
 
-    Game game;
-    if (!game.attach(mem, off)) {
+    Game game(mem);
+    if (!game.attach(off)) {
         log_("entry: game attach failed\n");
         g_thread_done.store(true);
         return;
@@ -138,17 +136,17 @@ void data_thread() {
 
     // Input object: the live view angles are mirrored at +0x9C.
     const std::uintptr_t input_obj =
-        mem.read<std::uintptr_t>(game.client_base() + cs2cfg().offsets.dwCSGOInput)
+        mem.read<std::uintptr_t>(game.client_base() + Config::instance().offsets.dwCSGOInput)
             .value_or(0);
     if (input_obj) {
-        game.set_view_angle_source(input_obj + cs2cfg().offsets.viewAngleOffset);  // real view angles
-        uinput_aim::set_input_obj(input_obj);
-        uinput_aim::set_sensitivity_convar(find_sensitivity_convar(mem));
+        game.set_view_angle_source(input_obj + Config::instance().offsets.viewAngleOffset);  // real view angles
+        g_mouse.set_input_obj(input_obj);
+        g_mouse.set_sensitivity_convar(find_sensitivity_convar(mem));
         // Create the virtual device lazily on first aim (in-match, so it never
         // collides with the game's raw-input init) and keep it alive (no
         // destroy -> no pointer-warp self-move on release).
         game.set_angles_override([](const Vector3& a, bool) {
-            uinput_aim::move_to(a.x, a.y);
+            g_mouse.move_to(a.x, a.y);
         });
         log_("aim: uinput ready (input_obj=0x%llx)\n",
              static_cast<unsigned long long>(input_obj));
@@ -157,18 +155,20 @@ void data_thread() {
         game.set_angles_override([](const Vector3&, bool) {});
     }
 
-    Triggerbot trigger;
-    Rcs rcs;
+    Triggerbot trigger(game);
+    Rcs rcs(game);
+    Aimbot aimbot(game);
     while (g_run.load()) {
-        game.update(mem);
+        game.update();
+        check_bvh(aimbot, mem, off);  // deadlocked-style: 200 ms, map-change triggered
         {
             std::lock_guard<std::mutex> lk(g_ctx.mtx);
             g_ctx.snap = game.snapshot();
             g_ctx.valid = game.local_pawn() != 0;
+            for (Player& p : g_ctx.snap.players) p.visible = aimbot.visible(p);
         }
 
-        uinput_aim::set_local_pawn(game.local_pawn());
-        check_bvh(mem, off);  // deadlocked-style: 200 ms, map-change triggered
+        g_mouse.set_local_pawn(game.local_pawn());
 
         bool aim = false, trig = false, rcs_on = false;
         float fov = 12.f, sm = 6.f;
@@ -182,7 +182,7 @@ void data_thread() {
             fov = g_ctx.aim_fov;
             sm = g_ctx.aim_smooth;
         }
-        const bool steered = run_aimbot(game, mem, aim, fov, sm);
+        const bool steered = aimbot.run(aim, fov, sm);
         {
             std::lock_guard<std::mutex> lk(g_ctx.mtx);
             g_ctx.aim_active = steered;  // screen hint: aiming right now
@@ -197,8 +197,8 @@ void data_thread() {
             log_("aim: %s (aim_on=%d aim_toggle=%d)\n", aim ? "ACTIVE" : "off",
                  g_ctx.aim_on ? 1 : 0, g_ctx.aim_toggle ? 1 : 0);
         }
-        rcs.run(game, mem, rcs_on, rcs_strength);  // recoil control (independent)
-        trigger.run(game, mem, trig, fire_now);    // schedule (delayed shot)
+        rcs.run(rcs_on, rcs_strength);             // recoil control (independent)
+        trigger.run(trig, fire_now);               // schedule (delayed shot)
         trigger.run_shoot();                       // drive the button
 
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -216,7 +216,7 @@ __attribute__((constructor)) static void so_entry() {
     XInitThreads();
     input_x11::init();
     std::thread(data_thread).detach();
-    vk_hook::install();
+    g_vk_hook.install();
 }
 
 __attribute__((destructor)) static void so_exit() {
@@ -238,9 +238,9 @@ extern "C" void unload_self() {
     }
     // Stop rendering first so no other thread can touch the X11 connection
     // while we close it below.
-    vk_hook::uninstall();
+    g_vk_hook.uninstall();
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    uinput_aim::shutdown();
+    g_mouse.shutdown();
     input_x11::shutdown();
     std::fprintf(stderr, "cs2_internal: unload_self done (thread_done=%d)\n",
                  g_thread_done.load() ? 1 : 0);

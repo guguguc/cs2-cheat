@@ -138,8 +138,9 @@ struct Slot {
 
 }  // namespace
 
-bool resolve(int pid, Resolved& out) {
+bool OffsetResolver::attach(int pid) {
     plog("patterns: resolve start\n");
+    pid_ = pid;
     const auto ranges = executable_ranges(pid);
     if (ranges.empty()) {
         std::fprintf(stderr, "patterns: no executable libclient.so segment found\n");
@@ -162,7 +163,7 @@ bool resolve(int pid, Resolved& out) {
          static_cast<unsigned long long>(ranges.front().start));
 
     plog("patterns: loading config\n");
-    const auto& conf = cs2cfg();
+    const auto& conf = Config::instance();
     plog("patterns: config loaded, %zu patterns\n", conf.patterns.size());
     std::vector<Slot> slots;
     slots.reserve(conf.patterns.size());
@@ -223,47 +224,47 @@ bool resolve(int pid, Resolved& out) {
             if (conf.patterns[i].name == name) return slots[i].value;
         return 0;
     };
-    out.gameEntitySystem = get("gameEntitySystem");
-    out.entityListOffset = static_cast<int>(get("entityListOffset"));
-    out.m_pGameSceneNode = static_cast<int>(get("m_pGameSceneNode"));
-    out.m_iHealth = static_cast<int>(get("m_iHealth"));
-    out.m_lifeState = static_cast<int>(get("m_lifeState"));
-    out.m_iTeamNum = static_cast<int>(get("m_iTeamNum"));
-    out.m_hPawn = static_cast<int>(get("m_hPawn"));
-    out.m_pWeaponServices = static_cast<int>(get("m_pWeaponServices"));
-    out.m_bIsScoped = static_cast<int>(get("m_bIsScoped"));
-    out.localPlayerController = get("localPlayerController");
-    out.globalVars = get("globalVars");
-    out.viewMatrix = get("viewMatrix");
-    out.viewRender = get("viewRender");
-    out.vphysWorld = get("vphysWorld");
+    out_.gameEntitySystem = get("gameEntitySystem");
+    out_.entityListOffset = static_cast<int>(get("entityListOffset"));
+    out_.m_pGameSceneNode = static_cast<int>(get("m_pGameSceneNode"));
+    out_.m_iHealth = static_cast<int>(get("m_iHealth"));
+    out_.m_lifeState = static_cast<int>(get("m_lifeState"));
+    out_.m_iTeamNum = static_cast<int>(get("m_iTeamNum"));
+    out_.m_hPawn = static_cast<int>(get("m_hPawn"));
+    out_.m_pWeaponServices = static_cast<int>(get("m_pWeaponServices"));
+    out_.m_bIsScoped = static_cast<int>(get("m_bIsScoped"));
+    out_.localPlayerController = get("localPlayerController");
+    out_.globalVars = get("globalVars");
+    out_.viewMatrix = get("viewMatrix");
+    out_.viewRender = get("viewRender");
+    out_.vphysWorld = get("vphysWorld");
 
-    out.ok = true;
+    out_.ok = true;
     for (const auto& name : conf.required) {
         const std::uintptr_t v = get(name.c_str());
         if (v == 0) {
             std::fprintf(stderr, "patterns: MISSING pattern: %s\n", name.c_str());
             plog("patterns: MISSING pattern: %s\n", name.c_str());
-            out.ok = false;
+            out_.ok = false;
         }
     }
 
     std::fprintf(stderr,
                  "patterns: resolved -> gs=0x%llx listOff=%d scene=%d health=%d life=%d team=%d "
                  "hPawn=%d ctrl=0x%llx viewMatrix=0x%llx weaponServices=%d scoped=%d\n",
-                 static_cast<unsigned long long>(out.gameEntitySystem), out.entityListOffset,
-                 out.m_pGameSceneNode, out.m_iHealth, out.m_lifeState, out.m_iTeamNum, out.m_hPawn,
-                 static_cast<unsigned long long>(out.localPlayerController),
-                 static_cast<unsigned long long>(out.viewMatrix), out.m_pWeaponServices,
-                 out.m_bIsScoped);
+                 static_cast<unsigned long long>(out_.gameEntitySystem), out_.entityListOffset,
+                 out_.m_pGameSceneNode, out_.m_iHealth, out_.m_lifeState, out_.m_iTeamNum, out_.m_hPawn,
+                 static_cast<unsigned long long>(out_.localPlayerController),
+                 static_cast<unsigned long long>(out_.viewMatrix), out_.m_pWeaponServices,
+                 out_.m_bIsScoped);
     plog("patterns: resolved ok=%d -> gs=0x%llx listOff=%d scene=%d health=%d life=%d team=%d "
          "hPawn=%d ctrl=0x%llx viewMatrix=0x%llx\n",
-         out.ok ? 1 : 0,
-         static_cast<unsigned long long>(out.gameEntitySystem), out.entityListOffset,
-         out.m_pGameSceneNode, out.m_iHealth, out.m_lifeState, out.m_iTeamNum, out.m_hPawn,
-         static_cast<unsigned long long>(out.localPlayerController),
-         static_cast<unsigned long long>(out.viewMatrix));
-    return out.ok;
+         out_.ok ? 1 : 0,
+         static_cast<unsigned long long>(out_.gameEntitySystem), out_.entityListOffset,
+         out_.m_pGameSceneNode, out_.m_iHealth, out_.m_lifeState, out_.m_iTeamNum, out_.m_hPawn,
+         static_cast<unsigned long long>(out_.localPlayerController),
+         static_cast<unsigned long long>(out_.viewMatrix));
+    return out_.ok;
 }
 
 }  // namespace patterns

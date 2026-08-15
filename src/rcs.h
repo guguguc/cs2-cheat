@@ -1,7 +1,6 @@
 #pragma once
 
 #include "game.h"
-#include "memory.h"
 
 #include <deque>
 
@@ -11,11 +10,14 @@
 // a locked target. Uses acceleration clamping + strength scaling.
 class Rcs {
 public:
+    explicit Rcs(Game& game) : game_(game) {}
+
     // Called every frame from the data thread. enabled = menu RCS switch,
     // strength = 0..1 compensation amount from the panel.
-    void run(Game& game, const Memory& mem, bool enabled, float strength);
+    void run(bool enabled, float strength);
 
 private:
+    Game& game_;
     Vector2 prev_punch_{};
     Vector2 unaccounted_{};
     Vector2 velocity_{};

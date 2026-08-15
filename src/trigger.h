@@ -1,7 +1,6 @@
 #pragma once
 
 #include "game.h"
-#include "memory.h"
 
 #include <chrono>
 
@@ -11,10 +10,13 @@
 // the aimbot only steers.
 class Triggerbot {
 public:
-    void run(Game& game, const Memory& mem, bool enabled, bool& fire_now);
+    explicit Triggerbot(Game& game) : game_(game) {}
+
+    void run(bool enabled, bool& fire_now);
     void run_shoot();
 
 private:
+    Game& game_;
     bool shot_pending_ = false;  // a shot is scheduled (waiting for delay)
     std::chrono::steady_clock::time_point shot_start_{};
     std::chrono::steady_clock::time_point shot_end_{};

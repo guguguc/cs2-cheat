@@ -55,8 +55,19 @@ struct Resolved {
     bool ok = false;  // true only when every required pattern was found
 };
 
-// Scans the executable section of libclient.so in `pid` and fills `out`.
-// Returns false (and logs which pattern) if any required pattern is missing.
-bool resolve(int pid, Resolved& out);
+// Runtime offset resolver: scans the executable section of libclient.so once
+// and owns the resolved offsets. `attach()` may be retried until `ok()`.
+class OffsetResolver {
+public:
+    // Scans libclient.so in `pid` and fills the resolved offsets. Returns
+    // false (and logs which pattern) if any required pattern is missing.
+    bool attach(int pid);
+    bool ok() const { return out_.ok; }
+    const Resolved& resolved() const { return out_; }
+
+private:
+    int pid_ = 0;
+    Resolved out_{};
+};
 
 }  // namespace patterns

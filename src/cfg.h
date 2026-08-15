@@ -44,13 +44,21 @@ struct OffsetCfg {
     float sensitivity                 = 2.5f;
 };
 
-struct Config {
+// Runtime configuration (patterns + offsets), loaded once from JSON. Owns the
+// load-on-first-use singleton; everything else just reads `Config::instance()`.
+class Config {
+public:
     std::vector<PatternCfg> patterns;
     std::vector<std::string> required;
     OffsetCfg offsets;
     bool loaded = false;
-};
 
-// Loads config from CS2_CONFIG (default: /home/gugugu/Repo/cs2-cheat/config/
-// cs2_config.json). On failure returns defaults so the cheat still works.
-const Config& cs2cfg();
+    // Loads (on first call) from CS2_CONFIG (default: /home/gugugu/Repo/
+    // cs2-cheat/config/cs2_config.json). On failure keeps defaults so the
+    // cheat still works.
+    static Config& instance();
+
+private:
+    Config();
+    void load();
+};

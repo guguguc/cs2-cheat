@@ -15,7 +15,8 @@ find_package(X11 QUIET)
 if(Vulkan_FOUND AND X11_FOUND)
     add_library(cs2_internal SHARED
         internal/entry.cpp
-        internal/uinput_aim.cpp
+        internal/imgui_renderer.cpp
+        internal/mouse_device.cpp
         internal/vk_hook.cpp
         internal/input_x11.cpp
         internal/overlay_draw.cpp

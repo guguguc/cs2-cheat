@@ -25,6 +25,7 @@ struct Player {
     Vector3 head;            // head bone (Source units)
     Vector3 velocity;
     float distance_m = 0.f;
+    bool visible = false;  // BVH line-of-sight from local eye (filled by the data thread)
     // Radar frame: x = right of local, y = forward of local (meters).
     Vector2 radar_xy;
     // Bone skeleton: parent indices + per-bone world positions (Source units).
@@ -43,12 +44,16 @@ struct Snapshot {
     bool valid = false;
 };
 
+// Reads the game's state through a shared Memory handle. Owns the resolved
+// offsets and the per-frame player snapshot.
 class Game {
 public:
+    explicit Game(const Memory& mem) : mem_(mem) {}
+
     // Resolves the libclient.so base address of the attached process.
-    bool attach(const Memory& mem, const patterns::Resolved& offsets);
+    bool attach(const patterns::Resolved& offsets);
     // Refreshes local pawn, view matrix/angles and the entity list.
-    void update(Memory& mem);
+    void update();
 
     // Internal (injected) build: point the view-angle read/write at the input
     // object's live view-angle slots instead of the stale dwViewAngles global.
@@ -72,35 +77,38 @@ public:
     const std::vector<Player>& players() const { return players_; }
     Snapshot snapshot() const;
 
+    // Shared memory handle (feature modules read raw fields through it).
+    const Memory& memory() const { return mem_; }
+
     // Aimbot support.
-    Vector3 local_eye(const Memory& mem) const;
-    bool set_view_angles(const Memory& mem, const Vector3& ang) const;
+    Vector3 local_eye() const;
+    bool set_view_angles(const Vector3& ang) const;
 
     // Resolve a weapon handle -> entity address (handle & 0xFFF -> entity list).
-    std::uintptr_t entity_by_handle(const Memory& mem, int handle) const {
+    std::uintptr_t entity_by_handle(int handle) const {
         if (handle <= 0) return 0;
-        return entity_by_index(mem, handle & 0xFFF);
+        return entity_by_index(handle & 0xFFF);
     }
     // Reads the local player's active weapon designer name (e.g. "weapon_awp").
-    std::string weapon_name(const Memory& mem) const;
+    std::string weapon_name() const;
 
     // Triggerbot support (resolve an arbitrary entity index).
-    std::uintptr_t entity_by_index(const Memory& mem, int index) const;
-    int entity_team(const Memory& mem, std::uintptr_t ent) const;
-    int entity_health(const Memory& mem, std::uintptr_t ent) const;
+    std::uintptr_t entity_by_index(int index) const;
+    int entity_team(std::uintptr_t ent) const;
+    int entity_health(std::uintptr_t ent) const;
     // Reads a single bone world position (BVH visibility check).
-    bool read_bone(const Memory& mem, std::uintptr_t pawn, int bone, Vector3& out) const;
+    bool read_bone(std::uintptr_t pawn, int bone, Vector3& out) const;
 
 private:
-    void read_player(const Memory& mem, std::uintptr_t addr,
-                     bool is_local, Player& out) const;
+    void read_player(std::uintptr_t addr, bool is_local, Player& out) const;
     // Reads the full bone skeleton (parents / world positions / flags).
-    void read_skeleton(const Memory& mem, std::uintptr_t pawn, Player& out) const;
+    void read_skeleton(std::uintptr_t pawn, Player& out) const;
     void project_radar(const Player& local, Player& p) const;
     // Osiris CConcreteEntityList chunk traversal.
-    std::uintptr_t entity_by_index_impl(const Memory& mem, int index) const;
+    std::uintptr_t entity_by_index_impl(int index) const;
     std::uintptr_t entity_list() const;
 
+    const Memory& mem_;
     std::uintptr_t client_base_ = 0;
     std::uintptr_t entity_list_ = 0;
     std::uintptr_t local_pawn_ = 0;

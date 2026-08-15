@@ -12,9 +12,9 @@
 
 namespace {
 
-ImU32 team_color(int team, bool teammate) {
-    if (teammate) return IM_COL32(170, 170, 170, 255);
-    return team == 2 ? IM_COL32(255, 90, 90, 255) : IM_COL32(90, 190, 255, 255);
+ImU32 visibility_color(bool visible) {
+    // visible = red, hidden = blue
+    return visible ? IM_COL32(255, 60, 60, 255) : IM_COL32(70, 130, 255, 255);
 }
 
 ImU32 health_color(int hp) {
@@ -30,9 +30,9 @@ constexpr std::uint32_t kBoneFlagHitbox = 0x100;
 
 }  // namespace
 
-namespace overlay_draw {
+Overlay g_overlay;
 
-void esp(SharedCtx& ctx, const ImVec2& display) {
+void Overlay::esp(SharedCtx& ctx, const ImVec2& display) const {
     if (!ctx.esp_on || !ctx.valid) return;
     const Snapshot& snap = ctx.snap;
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
@@ -52,7 +52,7 @@ void esp(SharedCtx& ctx, const ImVec2& display) {
                            static_cast<int>(sh), head))
             continue;
 
-        const ImU32 col = team_color(p.team, p.team == snap.local.team);
+        const ImU32 col = visibility_color(p.visible);
 
         // ---- skeleton: parent -> child bone lines ----
         const std::size_t n = std::min(p.bone_parents.size(), p.bone_pos.size());
@@ -106,7 +106,7 @@ void esp(SharedCtx& ctx, const ImVec2& display) {
     }
 }
 
-void aim_hint(SharedCtx& ctx, const ImVec2& display) {
+void Overlay::aim_hint(SharedCtx& ctx, const ImVec2& display) const {
     if (!ctx.aim_active || ctx.panel_open) return;
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
     const int sw = static_cast<int>(display.x);
@@ -218,7 +218,7 @@ bool ui_toggle(const char* label, bool* v) {
     return clicked;
 }
 
-void panel(SharedCtx& ctx) {
+void Overlay::panel(SharedCtx& ctx) const {
     if (!ctx.panel_open) return;
 
     ImGui::SetNextWindowPos({16.f, 16.f}, ImGuiCond_FirstUseEver);
@@ -349,5 +349,3 @@ void panel(SharedCtx& ctx) {
     ImGui::PopStyleColor(2);
     ImGui::End();
 }
-
-}  // namespace overlay_draw

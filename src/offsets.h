@@ -21,12 +21,12 @@
 //      features (armor/flash display, player names) or minor aim precision.
 //      NOTE: the RVA offsets (dwCSGOInput, view-angle mirror, schema fields,
 //      sensitivity) now live in config/cs2_config.json and are loaded at
-//      runtime via cs2cfg() - update the JSON, not this file.
+//      runtime via Config::instance() - update the JSON, not this file.
 // ============================================================================
 namespace offsets {
 
 // Stale write/read fallback for the camera angles (not used by the aim path;
-// the live angles come from the input object mirror via cs2cfg()).
+// the live angles come from the input object mirror via Config::instance()).
 inline constexpr std::uintptr_t dwViewAngles = 0x45773E0;
 
 // ---- engine struct layouts (hardcoded, like Osiris does) --------------------

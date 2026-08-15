@@ -27,11 +27,16 @@ std::uintptr_t parse_hex(const std::string& s) {
 }
 }  // namespace
 
-static Config& cfg_impl() {
+Config& Config::instance() {
     static Config c;
-    static bool init = false;
-    if (init) return c;
-    init = true;
+    return c;
+}
+
+Config::Config() {
+    load();
+}
+
+void Config::load() {
     cfg_log("cfg: loaded once\n");
 
     const char* path = std::getenv("CS2_CONFIG");
@@ -43,7 +48,7 @@ static Config& cfg_impl() {
     if (!f) {
         std::fprintf(stderr, "cfg: cannot open %s (using defaults)\n", path);
         cfg_log("cfg: cannot open %s (using defaults)\n", path);
-        return c;
+        return;
     }
     const std::string text((std::istreambuf_iterator<char>(f)),
                            std::istreambuf_iterator<char>());
@@ -57,7 +62,7 @@ static Config& cfg_impl() {
         if (root.is_discarded() || !root.is_object()) {
             std::fprintf(stderr, "cfg: bad JSON in %s (using defaults)\n", path);
             cfg_log("cfg: bad JSON in %s (using defaults)\n", path);
-            return c;
+            return;
         }
 
         cfg_log("cfg: looking for patterns\n");
@@ -72,12 +77,12 @@ static Config& cfg_impl() {
                 pc.size    = e.value("size", 4);
                 pc.len     = e.value("len", 4);
                 if (!pc.name.empty() && !pc.pattern.empty())
-                    c.patterns.push_back(std::move(pc));
+                    patterns.push_back(std::move(pc));
             }
         }
         if (root.contains("required") && root["required"].is_array())
             for (const auto& e : root["required"])
-                if (e.is_string()) c.required.push_back(e.get<std::string>());
+                if (e.is_string()) required.push_back(e.get<std::string>());
 
         cfg_log("cfg: patterns done, looking for offsets\n");
         if (root.contains("offsets") && root["offsets"].is_object()) {
@@ -86,51 +91,51 @@ static Config& cfg_impl() {
                 if (offs.contains(k) && offs[k].is_string())
                     dst = parse_hex(offs[k].get<std::string>());
             };
-            set("dwCSGOInput", c.offsets.dwCSGOInput);
-            set("viewAngleOffset", c.offsets.viewAngleOffset);
-            set("m_vecViewOffset", c.offsets.m_vecViewOffset);
-            set("m_ArmorValue", c.offsets.m_ArmorValue);
-            set("m_iIDEntIndex", c.offsets.m_iIDEntIndex);
-            set("m_pAimPunchServices", c.offsets.m_pAimPunchServices);
-            set("aimPunchCache", c.offsets.aimPunchCache);
-            set("m_iShotsFired", c.offsets.m_iShotsFired);
-            set("m_pWeaponServices", c.offsets.m_pWeaponServices);
-            set("m_flFOVSensitivityAdjust", c.offsets.m_flFOVSensitivityAdjust);
-            set("m_hActiveWeapon", c.offsets.m_hActiveWeapon);
-            set("m_designerName", c.offsets.m_designerName);
-            set("m_pGameSceneNode", c.offsets.m_pGameSceneNode);
-            set("m_modelState", c.offsets.m_modelState);
-            set("boneStateData", c.offsets.boneStateData);
-            set("m_hModel", c.offsets.m_hModel);
-            set("boneCount", c.offsets.boneCount);
-            set("boneNames", c.offsets.boneNames);
-            set("boneParents", c.offsets.boneParents);
-            set("boneFlags", c.offsets.boneFlags);
-            set("boneElementSize", c.offsets.boneElementSize);
+            set("dwCSGOInput", offsets.dwCSGOInput);
+            set("viewAngleOffset", offsets.viewAngleOffset);
+            set("m_vecViewOffset", offsets.m_vecViewOffset);
+            set("m_ArmorValue", offsets.m_ArmorValue);
+            set("m_iIDEntIndex", offsets.m_iIDEntIndex);
+            set("m_pAimPunchServices", offsets.m_pAimPunchServices);
+            set("aimPunchCache", offsets.aimPunchCache);
+            set("m_iShotsFired", offsets.m_iShotsFired);
+            set("m_pWeaponServices", offsets.m_pWeaponServices);
+            set("m_flFOVSensitivityAdjust", offsets.m_flFOVSensitivityAdjust);
+            set("m_hActiveWeapon", offsets.m_hActiveWeapon);
+            set("m_designerName", offsets.m_designerName);
+            set("m_pGameSceneNode", offsets.m_pGameSceneNode);
+            set("m_modelState", offsets.m_modelState);
+            set("boneStateData", offsets.boneStateData);
+            set("m_hModel", offsets.m_hModel);
+            set("boneCount", offsets.boneCount);
+            set("boneNames", offsets.boneNames);
+            set("boneParents", offsets.boneParents);
+            set("boneFlags", offsets.boneFlags);
+            set("boneElementSize", offsets.boneElementSize);
             if (offs.contains("boneHeadIndex") && offs["boneHeadIndex"].is_number())
-                c.offsets.boneHeadIndex = offs["boneHeadIndex"].get<int>();
+                offsets.boneHeadIndex = offs["boneHeadIndex"].get<int>();
             if (offs.contains("boneNeckIndex") && offs["boneNeckIndex"].is_number())
-                c.offsets.boneNeckIndex = offs["boneNeckIndex"].get<int>();
-            set("m_vecVelocity", c.offsets.m_vecVelocity);
-            set("m_flFlashOverlayAlpha", c.offsets.m_flFlashOverlayAlpha);
-            set("dwLocalPlayerPawn", c.offsets.dwLocalPlayerPawn);
+                offsets.boneNeckIndex = offs["boneNeckIndex"].get<int>();
+            set("m_vecVelocity", offsets.m_vecVelocity);
+            set("m_flFlashOverlayAlpha", offsets.m_flFlashOverlayAlpha);
+            set("dwLocalPlayerPawn", offsets.dwLocalPlayerPawn);
             if (offs.contains("sensitivity") && offs["sensitivity"].is_number())
-                c.offsets.sensitivity = offs["sensitivity"].get<float>();
+                offsets.sensitivity = offs["sensitivity"].get<float>();
         }
 
-        c.loaded = true;
+        loaded = true;
         std::fprintf(stderr, "cfg: loaded %zu patterns, %zu offsets from %s\n",
-                     c.patterns.size(), c.required.size(), path);
+                     patterns.size(), required.size(), path);
         cfg_log("cfg: loaded %zu patterns, %zu required, sens %.1f, csgoInput=0x%llx\n",
-                c.patterns.size(), c.required.size(),
-                static_cast<double>(c.offsets.sensitivity),
-                static_cast<unsigned long long>(c.offsets.dwCSGOInput));
+                patterns.size(), required.size(),
+                static_cast<double>(offsets.sensitivity),
+                static_cast<unsigned long long>(offsets.dwCSGOInput));
     } catch (const std::exception& e) {
         std::fprintf(stderr, "cfg: exception %s (using defaults)\n", e.what());
         cfg_log("cfg: exception %s (using defaults)\n", e.what());
-        c = Config{};
+        patterns.clear();
+        required.clear();
+        offsets = OffsetCfg{};
+        loaded = false;
     }
-    return c;
 }
-
-const Config& cs2cfg() { return cfg_impl(); }
