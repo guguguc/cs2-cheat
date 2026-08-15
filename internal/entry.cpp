@@ -26,6 +26,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 SharedCtx g_ctx;
 
@@ -158,14 +159,32 @@ void data_thread() {
     Triggerbot trigger(game);
     Rcs rcs(game);
     Aimbot aimbot(game);
+    std::unordered_map<std::uintptr_t, bool> visibility_cache;
+    auto next_visibility_update = std::chrono::steady_clock::time_point{};
     while (g_run.load()) {
         game.update();
         check_bvh(aimbot, mem, off);  // deadlocked-style: 200 ms, map-change triggered
+
+        // BVH visibility involves several remote memory reads and ray casts per
+        // player. Keep it off the render/input lock and refresh it at a lower
+        // rate so ESP coloring cannot stall the game's mouse or ImGui frame.
+        Snapshot snapshot = game.snapshot();
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= next_visibility_update) {
+            visibility_cache.clear();
+            for (const Player& p : snapshot.players)
+                visibility_cache[p.address] = aimbot.visible(p);
+            next_visibility_update = now + std::chrono::milliseconds(200);
+        }
+        for (Player& p : snapshot.players) {
+            const auto it = visibility_cache.find(p.address);
+            p.visible = it != visibility_cache.end() && it->second;
+        }
+
         {
             std::lock_guard<std::mutex> lk(g_ctx.mtx);
-            g_ctx.snap = game.snapshot();
+            g_ctx.snap = std::move(snapshot);
             g_ctx.valid = game.local_pawn() != 0;
-            for (Player& p : g_ctx.snap.players) p.visible = aimbot.visible(p);
         }
 
         g_mouse.set_local_pawn(game.local_pawn());
