@@ -1,6 +1,7 @@
 #include "vk_hook.h"
 
 #include "input_x11.h"
+#include "logger.h"
 #include "overlay_ctx.h"
 #include "overlay_draw.h"
 
@@ -12,27 +13,11 @@
 #include <fstream>
 #include <string>
 #include <vector>
-#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
 #include <chrono>
 #include <thread>
-
-namespace {
-
-void log_(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-void log_(const char* fmt, ...) {
-    FILE* f = std::fopen("/tmp/cs2_internal.log", "a");
-    if (!f) return;
-    va_list ap;
-    va_start(ap, fmt);
-    std::vfprintf(f, fmt, ap);
-    va_end(ap);
-    std::fclose(f);
-}
-
-}  // namespace
 
 VulkanHook g_vk_hook;
 
@@ -102,14 +87,14 @@ void VulkanHook::install_icd_hook() {
     const auto create_instance =
         reinterpret_cast<PFN_vkCreateInstance>(real_igpa_(nullptr, "vkCreateInstance"));
     if (!create_instance || create_instance(&ici, nullptr, &inst) != VK_SUCCESS) {
-        log_("vk_hook: icd-hook: could not create helper instance\n");
+        Logger::instance().error("vk_hook: icd-hook: could not create helper instance\n");
         return;
     }
     const auto enum_phys = reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(
         real_igpa_(inst, "vkEnumeratePhysicalDevices"));
     std::uint32_t count = 0;
     if (!enum_phys || enum_phys(inst, &count, nullptr) != VK_SUCCESS || count == 0) {
-        log_("vk_hook: icd-hook: no physical devices\n");
+        Logger::instance().error("vk_hook: icd-hook: no physical devices\n");
         if (const auto di = reinterpret_cast<PFN_vkDestroyInstance>(
                 real_igpa_(inst, "vkDestroyInstance")); di)
             di(inst, nullptr);
@@ -136,7 +121,7 @@ void VulkanHook::install_icd_hook() {
         reinterpret_cast<PFN_vkCreateDevice>(real_igpa_(inst, "vkCreateDevice"));
     VkDevice dev = VK_NULL_HANDLE;
     if (!create_device || create_device(phys[0], &dci, nullptr, &dev) != VK_SUCCESS) {
-        log_("vk_hook: icd-hook: could not create helper device\n");
+        Logger::instance().error("vk_hook: icd-hook: could not create helper device\n");
         if (const auto di = reinterpret_cast<PFN_vkDestroyInstance>(
                 real_igpa_(inst, "vkDestroyInstance")); di)
             di(inst, nullptr);
@@ -148,17 +133,17 @@ void VulkanHook::install_icd_hook() {
     // the real implementations (ICD, or the outermost layer if one is active).
     IcdPresentFn present = reinterpret_cast<IcdPresentFn>(real_gdpa_(dev, "vkQueuePresentKHR"));
     if (!present || pointer_in_own_so(reinterpret_cast<std::uintptr_t>(present))) {
-        log_("vk_hook: icd-hook: resolved present unusable (%p) - overlay disabled\n",
-             reinterpret_cast<void*>(present));
+        Logger::instance().error("vk_hook: icd-hook: resolved present unusable (%p) - overlay disabled\n",
+                                 reinterpret_cast<void*>(present));
     } else if (hook64::install(h_icd_present_, reinterpret_cast<void*>(present),
                                reinterpret_cast<void*>(detour_present))) {
         icd_present_ = present;
-        log_("vk_hook: inline-hooked real vkQueuePresentKHR at %p\n",
-             reinterpret_cast<void*>(present));
+        Logger::instance().log("vk_hook: inline-hooked real vkQueuePresentKHR at %p\n",
+                               reinterpret_cast<void*>(present));
     } else {
         icd_present_ = present;
-        log_("vk_hook: inline-hook failed for real vkQueuePresentKHR (%p); calling it "
-             "directly\n", reinterpret_cast<void*>(present));
+        Logger::instance().error("vk_hook: inline-hook failed for real vkQueuePresentKHR (%p); calling it "
+                                 "directly\n", reinterpret_cast<void*>(present));
     }
 
     CreateSwapchainFn swapchain =
@@ -166,8 +151,8 @@ void VulkanHook::install_icd_hook() {
     if (swapchain && !pointer_in_own_so(reinterpret_cast<std::uintptr_t>(swapchain))) {
         if (hook64::install(h_icd_swapchain_, reinterpret_cast<void*>(swapchain),
                             reinterpret_cast<void*>(detour_create_swapchain_game)))
-            log_("vk_hook: inline-hooked real vkCreateSwapchainKHR at %p\n",
-                 reinterpret_cast<void*>(swapchain));
+            Logger::instance().log("vk_hook: inline-hooked real vkCreateSwapchainKHR at %p\n",
+                                   reinterpret_cast<void*>(swapchain));
     }
 
     if (const auto dd = reinterpret_cast<PFN_vkDestroyDevice>(real_igpa_(inst, "vkDestroyDevice")); dd)
@@ -235,17 +220,17 @@ VkResult VulkanHook::on_create_swapchain_game(VkDevice dev,
         extent_ = ci->imageExtent;
         image_count_ = ci->minImageCount;
         ready_ = false;
-        log_("vk_hook: swapchain recreated (game): %p format=%d %ux%u\n",
-             static_cast<void*>(*out), static_cast<int>(ci->imageFormat),
-             extent_.width, extent_.height);
+        Logger::instance().log("vk_hook: swapchain recreated (game): %p format=%d %ux%u\n",
+                               static_cast<void*>(*out), static_cast<int>(ci->imageFormat),
+                               extent_.width, extent_.height);
         // The game is NOT presenting while it creates the swapchain, so this
         // is the safe moment to build the overlay's Vulkan objects (pipeline
         // creation deadlocks the NVIDIA driver if it races vkQueuePresentKHR).
         if (last_queue_ && !ready_) {
             if (init_render(last_queue_))
-                log_("vk_hook: overlay render initialized\n");
+                Logger::instance().log("vk_hook: overlay render initialized\n");
             else
-                log_("vk_hook: init from swapchain creation FAILED\n");
+                Logger::instance().error("vk_hook: init from swapchain creation FAILED\n");
         }
     }
     return r;
@@ -293,9 +278,9 @@ VkResult VulkanHook::on_present(VkQueue queue, const VkPresentInfoKHR* pi) {
         if (ready_ && !no_overlay) render_frame(queue, idx);
         else if (!format_warned_ && format_ == VK_FORMAT_UNDEFINED) {
             format_warned_ = true;
-            log_("vk_hook: swapchain format unknown - the overlay was likely injected "
-                 "after the game created its swapchain. Recreate the swapchain "
-                 "(join a match / toggle fullscreen) or inject earlier.\n");
+            Logger::instance().error("vk_hook: swapchain format unknown - the overlay was likely injected "
+                                     "after the game created its swapchain. Recreate the swapchain "
+                                     "(join a match / toggle fullscreen) or inject earlier.\n");
         }
     }
     const VkResult result = real_present(queue, pi);
@@ -401,7 +386,7 @@ bool VulkanHook::init_render(VkQueue queue) {
     // resolution switches.
     if (!renderer_.init(instance_, phys_, device_, queue_family_, queue, pool_, rp_,
                         image_count_, &VulkanHook::imgui_loader)) {
-        log_("vk_hook: imgui renderer init failed\n");
+        Logger::instance().error("vk_hook: imgui renderer init failed\n");
         return false;
     }
 
@@ -500,7 +485,7 @@ void VulkanHook::install() {
     if (hooked_) return;
     void* vk = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_GLOBAL);
     if (!vk) {
-        std::fprintf(stderr, "vk_hook: dlopen libvulkan failed\n");
+        Logger::instance().error("vk_hook: dlopen libvulkan failed\n");
         return;
     }
     real_igpa_ = reinterpret_cast<PFN_vkGetInstanceProcAddr>(dlsym(vk, "vkGetInstanceProcAddr"));
@@ -510,7 +495,7 @@ void VulkanHook::install() {
     hook64::install(h_create_device_, dlsym(vk, "vkCreateDevice"),
                     reinterpret_cast<void*>(detour_create_device));
     hooked_ = true;
-    std::fprintf(stderr, "vk_hook: loader resolved, installing ICD hooks\n");
+    Logger::instance().log("vk_hook: loader resolved, installing ICD hooks\n");
     install_icd_hook();
 }
 
@@ -520,5 +505,5 @@ void VulkanHook::uninstall() {
     hook64::uninstall(h_create_instance_);
     hook64::uninstall(h_create_device_);
     hooked_ = false;
-    std::fprintf(stderr, "vk_hook: uninstalled\n");
+    Logger::instance().log("vk_hook: uninstalled\n");
 }

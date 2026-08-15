@@ -21,6 +21,7 @@ if(Vulkan_FOUND AND X11_FOUND)
         internal/input_x11.cpp
         internal/overlay_draw.cpp
         src/cfg.cpp
+        src/logger.cpp
         src/patterns.cpp
         src/game.cpp
         src/memory.cpp
@@ -62,7 +63,8 @@ add_test(NAME math_test COMMAND math_test)
 
 if(Vulkan_FOUND)
     add_executable(vk_hook_selftest tests/vk_hook_selftest.cpp)
-    target_include_directories(vk_hook_selftest PRIVATE internal)
+    target_include_directories(vk_hook_selftest PRIVATE internal src)
+    target_sources(vk_hook_selftest PRIVATE src/logger.cpp)
     target_link_libraries(vk_hook_selftest PRIVATE Vulkan::Vulkan dl)
     add_test(NAME vk_hook_selftest COMMAND vk_hook_selftest)
 
@@ -70,7 +72,8 @@ if(Vulkan_FOUND)
     target_link_libraries(scan_test PRIVATE dl)
     add_test(NAME scan_test COMMAND scan_test)
 
-    add_executable(hook64_test tests/hook64_test.cpp)
-    target_include_directories(hook64_test PRIVATE internal)
-    target_compile_options(hook64_test PRIVATE -Wall -Wextra -O2)
+     add_executable(hook64_test tests/hook64_test.cpp)
+     target_include_directories(hook64_test PRIVATE internal src)
+     target_sources(hook64_test PRIVATE src/logger.cpp)
+     target_compile_options(hook64_test PRIVATE -Wall -Wextra -O2)
 endif()

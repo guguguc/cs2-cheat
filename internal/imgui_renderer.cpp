@@ -2,24 +2,7 @@
 
 #include "imgui.h"
 #include "backends/imgui_impl_vulkan.h"
-
-#include <cstdarg>
-#include <cstdio>
-
-namespace {
-
-void log_(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-void log_(const char* fmt, ...) {
-    FILE* f = std::fopen("/tmp/cs2_internal.log", "a");
-    if (!f) return;
-    va_list ap;
-    va_start(ap, fmt);
-    std::vfprintf(f, fmt, ap);
-    va_end(ap);
-    std::fclose(f);
-}
-
-}  // namespace
+#include "logger.h"
 
 bool ImGuiRenderer::init(VkInstance instance, VkPhysicalDevice phys, VkDevice device,
                          std::uint32_t queue_family, VkQueue queue, VkDescriptorPool pool,
@@ -44,7 +27,7 @@ bool ImGuiRenderer::init(VkInstance instance, VkPhysicalDevice phys, VkDevice de
     ImGui::GetIO().MouseDrawCursor = true;
     ImGui::GetIO().IniFilename = "/tmp/cs2_internal_imgui.ini";
     if (!ImGui_ImplVulkan_LoadFunctions(VK_API_VERSION_1_3, loader, nullptr)) {
-        log_("imgui: ImGui_ImplVulkan_LoadFunctions failed\n");
+        Logger::instance().error("imgui: ImGui_ImplVulkan_LoadFunctions failed\n");
         return false;
     }
     ImGui_ImplVulkan_InitInfo info = {};
@@ -62,7 +45,7 @@ bool ImGuiRenderer::init(VkInstance instance, VkPhysicalDevice phys, VkDevice de
     info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     info.UseDynamicRendering = false;
     if (!ImGui_ImplVulkan_Init(&info)) {
-        log_("imgui: ImGui_ImplVulkan_Init failed\n");
+        Logger::instance().error("imgui: ImGui_ImplVulkan_Init failed\n");
         return false;
     }
     return true;

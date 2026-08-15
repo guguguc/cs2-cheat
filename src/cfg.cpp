@@ -1,8 +1,8 @@
 #include "cfg.h"
+#include "logger.h"
 
 #include <nlohmann/json.hpp>
 
-#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -11,17 +11,6 @@
 #include <vector>
 
 namespace {
-void cfg_log(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-void cfg_log(const char* fmt, ...) {
-    FILE* f = std::fopen("/tmp/cs2_internal.log", "a");
-    if (!f) return;
-    va_list ap;
-    va_start(ap, fmt);
-    std::vfprintf(f, fmt, ap);
-    va_end(ap);
-    std::fclose(f);
-}
-
 std::uintptr_t parse_hex(const std::string& s) {
     return static_cast<std::uintptr_t>(std::strtoull(s.c_str(), nullptr, 0));
 }
@@ -37,35 +26,33 @@ Config::Config() {
 }
 
 void Config::load() {
-    cfg_log("cfg: loaded once\n");
+    Logger::instance().log("cfg: loaded once\n");
 
     const char* path = std::getenv("CS2_CONFIG");
     const char* def = "/home/gugugu/Repo/cs2-cheat/config/cs2_config.json";
     if (!path || !*path) path = def;
 
-    cfg_log("cfg: opening %s\n", path);
+    Logger::instance().log("cfg: opening %s\n", path);
     std::ifstream f(path);
     if (!f) {
-        std::fprintf(stderr, "cfg: cannot open %s (using defaults)\n", path);
-        cfg_log("cfg: cannot open %s (using defaults)\n", path);
+        Logger::instance().error("cfg: cannot open %s (using defaults)\n", path);
         return;
     }
     const std::string text((std::istreambuf_iterator<char>(f)),
                            std::istreambuf_iterator<char>());
-    cfg_log("cfg: read %zu bytes\n", text.size());
+    Logger::instance().log("cfg: read %zu bytes\n", text.size());
 
     try {
         // allow_exceptions=false: a malformed file yields a discarded value
         // instead of throwing out of injected code.
         const nlohmann::json root = nlohmann::json::parse(text, nullptr, false);
-        cfg_log("cfg: root parsed\n");
+        Logger::instance().log("cfg: root parsed\n");
         if (root.is_discarded() || !root.is_object()) {
-            std::fprintf(stderr, "cfg: bad JSON in %s (using defaults)\n", path);
-            cfg_log("cfg: bad JSON in %s (using defaults)\n", path);
+            Logger::instance().error("cfg: bad JSON in %s (using defaults)\n", path);
             return;
         }
 
-        cfg_log("cfg: looking for patterns\n");
+        Logger::instance().log("cfg: looking for patterns\n");
         if (root.contains("patterns") && root["patterns"].is_array()) {
             for (const auto& e : root["patterns"]) {
                 if (!e.is_object()) continue;
@@ -84,7 +71,7 @@ void Config::load() {
             for (const auto& e : root["required"])
                 if (e.is_string()) required.push_back(e.get<std::string>());
 
-        cfg_log("cfg: patterns done, looking for offsets\n");
+        Logger::instance().log("cfg: patterns done, looking for offsets\n");
         if (root.contains("offsets") && root["offsets"].is_object()) {
             const auto& offs = root["offsets"];
             auto set = [&](const char* k, std::uintptr_t& dst) {
@@ -124,15 +111,14 @@ void Config::load() {
         }
 
         loaded = true;
-        std::fprintf(stderr, "cfg: loaded %zu patterns, %zu offsets from %s\n",
-                     patterns.size(), required.size(), path);
-        cfg_log("cfg: loaded %zu patterns, %zu required, sens %.1f, csgoInput=0x%llx\n",
+        Logger::instance().error("cfg: loaded %zu patterns, %zu offsets from %s\n",
+                                 patterns.size(), required.size(), path);
+        Logger::instance().log("cfg: loaded %zu patterns, %zu required, sens %.1f, csgoInput=0x%llx\n",
                 patterns.size(), required.size(),
                 static_cast<double>(offsets.sensitivity),
                 static_cast<unsigned long long>(offsets.dwCSGOInput));
     } catch (const std::exception& e) {
-        std::fprintf(stderr, "cfg: exception %s (using defaults)\n", e.what());
-        cfg_log("cfg: exception %s (using defaults)\n", e.what());
+        Logger::instance().error("cfg: exception %s (using defaults)\n", e.what());
         patterns.clear();
         required.clear();
         offsets = OffsetCfg{};

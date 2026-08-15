@@ -2,6 +2,7 @@
 #include "cfg.h"
 #include "game.h"
 #include "input_x11.h"
+#include "logger.h"
 #include "memory.h"
 #include "mouse_device.h"
 #include "offsets.h"
@@ -20,7 +21,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
-#include <cstdarg>
 #include <fstream>
 #include <mutex>
 #include <optional>
@@ -39,29 +39,18 @@ std::atomic<bool> g_run{true};
 // the library under it.
 std::atomic<bool> g_thread_done{false};
 
-void log_(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-void log_(const char* fmt, ...) {
-    FILE* f = std::fopen("/tmp/cs2_internal.log", "a");
-    if (!f) return;
-    va_list ap;
-    va_start(ap, fmt);
-    std::vfprintf(f, fmt, ap);
-    va_end(ap);
-    std::fclose(f);
-}
-
 // Scans the ICvar convar list for "sensitivity" (deadlocked-style).
 // libtier0.so exports VEngineCvar007 (interface table at base + kCvarIfaceOff);
 // each convar object has a name pointer at +0x0 and its float value at +0x58.
 std::uintptr_t find_sensitivity_convar(const Memory& mem) {
     const auto tier0 = module_base(mem.pid(), "libtier0.so");
-    if (!tier0) { log_("convar: no libtier0\n"); return 0; }
+    if (!tier0) { Logger::instance().log("convar: no libtier0\n"); return 0; }
     constexpr std::uintptr_t kCvarIfaceOff = 1423200;  // VEngineCvar007 (dumper 2026-08-13)
     const auto iface = mem.read<std::uintptr_t>(*tier0 + kCvarIfaceOff).value_or(0);
-    if (!iface) { log_("convar: no cvar interface\n"); return 0; }
+    if (!iface) { Logger::instance().log("convar: no cvar interface\n"); return 0; }
     const auto objects = mem.read<std::uintptr_t>(iface + 0x50).value_or(0);
     const std::uint32_t count = mem.read<std::uint32_t>(iface + 160).value_or(0);
-    if (!objects || !count) { log_("convar: empty list (count=%u)\n", count); return 0; }
+    if (!objects || !count) { Logger::instance().log("convar: empty list (count=%u)\n", count); return 0; }
     for (std::uint32_t i = 0; i < count && i < 4096; ++i) {
         const auto obj = mem.read<std::uintptr_t>(objects + i * 16).value_or(0);
         if (!obj) break;
@@ -70,11 +59,11 @@ std::uintptr_t find_sensitivity_convar(const Memory& mem) {
         char buf[32] = {0};
         mem.read(name_addr, buf, sizeof(buf) - 1);
         if (std::string(buf) == "sensitivity") {
-            log_("convar: sensitivity at 0x%llx\n", static_cast<unsigned long long>(obj));
+            Logger::instance().log("convar: sensitivity at 0x%llx\n", static_cast<unsigned long long>(obj));
             return obj;
         }
     }
-    log_("convar: sensitivity not found (count=%u)\n", count);
+    Logger::instance().log("convar: sensitivity not found (count=%u)\n", count);
     return 0;
 }
 
@@ -109,12 +98,12 @@ void check_bvh(Aimbot& aimbot, const Memory& mem, const patterns::Resolved& off)
 }
 
 void data_thread() {
-    log_("data_thread: start\n");
+    Logger::instance().log("data_thread: start\n");
     Memory mem;
     mem.attach(getpid());
     patterns::OffsetResolver offsets;
     if (!offsets.attach(getpid())) {
-        log_("entry: pattern resolve failed; retrying in background\n");
+        Logger::instance().log("entry: pattern resolve failed; retrying in background\n");
         for (int i = 0; i < 20 && !offsets.ok(); ++i) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
             offsets.attach(getpid());
@@ -128,12 +117,12 @@ void data_thread() {
 
     Game game(mem);
     if (!game.attach(off)) {
-        log_("entry: game attach failed\n");
+        Logger::instance().log("entry: game attach failed\n");
         g_thread_done.store(true);
         return;
     }
-    log_("entry: attached, offsets ok, client base 0x%llx\n",
-         static_cast<unsigned long long>(game.client_base()));
+    Logger::instance().log("entry: attached, offsets ok, client base 0x%llx\n",
+                           static_cast<unsigned long long>(game.client_base()));
 
     // Input object: the live view angles are mirrored at +0x9C.
     const std::uintptr_t input_obj =
@@ -149,10 +138,10 @@ void data_thread() {
         game.set_angles_override([](const Vector3& a, bool) {
             g_mouse.move_to(a.x, a.y);
         });
-        log_("aim: uinput ready (input_obj=0x%llx)\n",
-             static_cast<unsigned long long>(input_obj));
+        Logger::instance().log("aim: uinput ready (input_obj=0x%llx)\n",
+                               static_cast<unsigned long long>(input_obj));
     } else {
-        log_("input: no input object (dwCSGOInput null)\n");
+        Logger::instance().log("input: no input object (dwCSGOInput null)\n");
         game.set_angles_override([](const Vector3&, bool) {});
     }
 
@@ -209,12 +198,12 @@ void data_thread() {
         bool fire_now = false;
 
         if (steered)
-            log_("aimbot: steered (aim=%d)\n", aim ? 1 : 0);
+            Logger::instance().log("aimbot: steered (aim=%d)\n", aim ? 1 : 0);
         static bool last_aim = false;
         if (aim != last_aim) {
             last_aim = aim;
-            log_("aim: %s (aim_on=%d aim_toggle=%d)\n", aim ? "ACTIVE" : "off",
-                 g_ctx.aim_on ? 1 : 0, g_ctx.aim_toggle ? 1 : 0);
+            Logger::instance().log("aim: %s (aim_on=%d aim_toggle=%d)\n", aim ? "ACTIVE" : "off",
+                                   g_ctx.aim_on ? 1 : 0, g_ctx.aim_toggle ? 1 : 0);
         }
         rcs.run(rcs_on, rcs_strength);             // recoil control (independent)
         trigger.run(trig, fire_now);               // schedule (delayed shot)
@@ -223,14 +212,14 @@ void data_thread() {
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
     g_thread_done.store(true);
-    log_("data_thread: exited\n");
+    Logger::instance().log("data_thread: exited\n");
 }
 
 }  // namespace
 
 __attribute__((constructor)) static void so_entry() {
-    std::fprintf(stderr, "cs2_internal: loaded into pid %d\n", getpid());
-    log_("=== cs2_internal loaded pid=%d ===\n", getpid());
+    Logger::instance().error("cs2_internal: loaded into pid %d\n", getpid());
+    Logger::instance().log("=== cs2_internal loaded pid=%d ===\n", getpid());
     // Multiple threads use Xlib connections (input_x11 + xtest_aim).
     XInitThreads();
     input_x11::init();
@@ -240,7 +229,7 @@ __attribute__((constructor)) static void so_entry() {
 
 __attribute__((destructor)) static void so_exit() {
     g_run.store(false);
-    std::fprintf(stderr, "cs2_internal: unloaded\n");
+    Logger::instance().error("cs2_internal: unloaded\n");
 }
 
 // Called remotely by the unloader tool (injector_call). Stops the data
@@ -261,6 +250,6 @@ extern "C" void unload_self() {
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     g_mouse.shutdown();
     input_x11::shutdown();
-    std::fprintf(stderr, "cs2_internal: unload_self done (thread_done=%d)\n",
-                 g_thread_done.load() ? 1 : 0);
+    Logger::instance().error("cs2_internal: unload_self done (thread_done=%d)\n",
+                             g_thread_done.load() ? 1 : 0);
 }

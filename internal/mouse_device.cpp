@@ -1,5 +1,6 @@
 #include "mouse_device.h"
 #include "cfg.h"
+#include "logger.h"
 #include "overlay_ctx.h"
 
 #include <fcntl.h>
@@ -9,22 +10,10 @@
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
-#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 
 namespace {
-
-void log_(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-void log_(const char* fmt, ...) {
-    FILE* f = std::fopen("/tmp/cs2_internal.log", "a");
-    if (!f) return;
-    va_list ap;
-    va_start(ap, fmt);
-    std::vfprintf(f, fmt, ap);
-    va_end(ap);
-    std::fclose(f);
-}
 
 // deadlocked: 1 / (sensitivity * 0.022) = counts per degree.
 float counts_per_deg(float sens) { return 1.0f / (sens * 0.022f); }
@@ -75,8 +64,8 @@ bool MouseDevice::init() {
     if (fd_ >= 0) return true;
     fd_ = ::open("/dev/uinput", O_WRONLY | O_NONBLOCK);
     if (fd_ < 0) {
-        log_("uinput: open /dev/uinput failed (%d); add user to the uinput "
-             "group or run with sudo\n", errno);
+        Logger::instance().error("uinput: open /dev/uinput failed (%d); add user to the uinput "
+                                 "group or run with sudo\n", errno);
         return false;
     }
     ioctl(fd_, UI_SET_EVBIT, EV_KEY);
@@ -96,14 +85,14 @@ bool MouseDevice::init() {
                  UINPUT_MAX_NAME_SIZE - 1);
     if (ioctl(fd_, UI_DEV_SETUP, &setup) < 0 ||
         ioctl(fd_, UI_DEV_CREATE) < 0) {
-        log_("uinput: UI_DEV_CREATE failed (%d)\n", errno);
+        Logger::instance().error("uinput: UI_DEV_CREATE failed (%d)\n", errno);
         ::close(fd_);
         fd_ = -1;
         return false;
     }
-    log_("uinput: virtual mouse created (sens %.1f, %.3f counts/deg)\n",
-         Config::instance().offsets.sensitivity,
-         counts_per_deg(Config::instance().offsets.sensitivity));
+    Logger::instance().log("uinput: virtual mouse created (sens %.1f, %.3f counts/deg)\n",
+                           Config::instance().offsets.sensitivity,
+                           counts_per_deg(Config::instance().offsets.sensitivity));
     return true;
 }
 
@@ -147,8 +136,8 @@ void MouseDevice::move_to(float target_pitch, float target_yaw) {
     if (dx == 0 && dy == 0) return;
     ++move_log_;
     if ((move_log_ & 0x3F) == 0)  // log every 64th steer to avoid spam
-        log_("uinput: steer #%llu dx=%d dy=%d\n",
-             static_cast<unsigned long long>(move_log_), dx, dy);
+        Logger::instance().log("uinput: steer #%llu dx=%d dy=%d\n",
+                               static_cast<unsigned long long>(move_log_), dx, dy);
     move_counts(dx, dy);
     // Aiming only: the triggerbot owns firing (deadlocked separates them).
 }
@@ -190,7 +179,7 @@ bool MouseDevice::active() const { return fd_ >= 0; }
 
 void MouseDevice::shutdown() {
     if (fd_ >= 0) {
-        log_("uinput: device destroyed\n");
+        Logger::instance().log("uinput: device destroyed\n");
         ioctl(fd_, UI_DEV_DESTROY);
         ::close(fd_);
         fd_ = -1;

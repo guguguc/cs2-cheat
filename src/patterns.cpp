@@ -1,13 +1,13 @@
 #include "patterns.h"
 
 #include "cfg.h"
+#include "logger.h"
 #include "memory.h"
 #include "process.h"
 
 #include <sys/uio.h>
 
 #include <algorithm>
-#include <cstdarg>
 #include <cctype>
 #include <cstdio>
 #include <cstring>
@@ -18,17 +18,6 @@
 #include <vector>
 
 namespace {
-
-void plog(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-void plog(const char* fmt, ...) {
-    FILE* f = std::fopen("/tmp/cs2_internal.log", "a");
-    if (!f) return;
-    va_list ap;
-    va_start(ap, fmt);
-    std::vfprintf(f, fmt, ap);
-    va_end(ap);
-    std::fclose(f);
-}
 
 constexpr std::uint32_t kWildcard = 0x100;  // sentinel for '?' in a pattern
 constexpr std::size_t kReadChunk = 1u << 20;  // 1 MiB per process_vm_readv
@@ -139,12 +128,11 @@ struct Slot {
 }  // namespace
 
 bool OffsetResolver::attach(int pid) {
-    plog("patterns: resolve start\n");
+    Logger::instance().log("patterns: resolve start\n");
     pid_ = pid;
     const auto ranges = executable_ranges(pid);
     if (ranges.empty()) {
-        std::fprintf(stderr, "patterns: no executable libclient.so segment found\n");
-        plog("patterns: FAILED no executable libclient.so segment\n");
+        Logger::instance().error("patterns: FAILED no executable libclient.so segment\n");
         return false;
     }
 
@@ -152,19 +140,18 @@ bool OffsetResolver::attach(int pid) {
     mem.attach(pid);
     std::vector<std::uint8_t> text;
     if (!read_text(mem, ranges.front(), text)) {
-        std::fprintf(stderr, "patterns: failed to read libclient.so .text (%zu MiB)\n",
-                     ranges.front().size >> 20);
-        plog("patterns: FAILED read .text (%zu MiB)\n", ranges.front().size >> 20);
+        Logger::instance().error("patterns: FAILED read libclient.so .text (%zu MiB)\n",
+                                 ranges.front().size >> 20);
         return false;
     }
-    std::fprintf(stderr, "patterns: scanned %zu MiB of libclient.so code\n",
-                 ranges.front().size >> 20);
-    plog("patterns: scanned %zu MiB @0x%llx\n", ranges.front().size >> 20,
-         static_cast<unsigned long long>(ranges.front().start));
+    Logger::instance().log("patterns: scanned %zu MiB of libclient.so code\n",
+                           ranges.front().size >> 20);
+    Logger::instance().log("patterns: scanned %zu MiB @0x%llx\n", ranges.front().size >> 20,
+                           static_cast<unsigned long long>(ranges.front().start));
 
-    plog("patterns: loading config\n");
+    Logger::instance().log("patterns: loading config\n");
     const auto& conf = Config::instance();
-    plog("patterns: config loaded, %zu patterns\n", conf.patterns.size());
+    Logger::instance().log("patterns: config loaded, %zu patterns\n", conf.patterns.size());
     std::vector<Slot> slots;
     slots.reserve(conf.patterns.size());
     for (const auto& pc : conf.patterns) {
@@ -213,9 +200,9 @@ bool OffsetResolver::attach(int pid) {
                 break;
             }
         }
-        plog("patterns: %-22s found=%d occ=%d val=0x%llx\n", pc.name.c_str(),
-             s.scan.found ? 1 : 0, s.scan.occurrences,
-             static_cast<unsigned long long>(s.value));
+        Logger::instance().log("patterns: %-22s found=%d occ=%d val=0x%llx\n", pc.name.c_str(),
+                               s.scan.found ? 1 : 0, s.scan.occurrences,
+                               static_cast<unsigned long long>(s.value));
         slots.push_back(std::move(s));
     }
 
@@ -243,13 +230,12 @@ bool OffsetResolver::attach(int pid) {
     for (const auto& name : conf.required) {
         const std::uintptr_t v = get(name.c_str());
         if (v == 0) {
-            std::fprintf(stderr, "patterns: MISSING pattern: %s\n", name.c_str());
-            plog("patterns: MISSING pattern: %s\n", name.c_str());
+            Logger::instance().error("patterns: MISSING pattern: %s\n", name.c_str());
             out_.ok = false;
         }
     }
 
-    std::fprintf(stderr,
+    Logger::instance().log(
                  "patterns: resolved -> gs=0x%llx listOff=%d scene=%d health=%d life=%d team=%d "
                  "hPawn=%d ctrl=0x%llx viewMatrix=0x%llx weaponServices=%d scoped=%d\n",
                  static_cast<unsigned long long>(out_.gameEntitySystem), out_.entityListOffset,
@@ -257,13 +243,13 @@ bool OffsetResolver::attach(int pid) {
                  static_cast<unsigned long long>(out_.localPlayerController),
                  static_cast<unsigned long long>(out_.viewMatrix), out_.m_pWeaponServices,
                  out_.m_bIsScoped);
-    plog("patterns: resolved ok=%d -> gs=0x%llx listOff=%d scene=%d health=%d life=%d team=%d "
-         "hPawn=%d ctrl=0x%llx viewMatrix=0x%llx\n",
-         out_.ok ? 1 : 0,
-         static_cast<unsigned long long>(out_.gameEntitySystem), out_.entityListOffset,
-         out_.m_pGameSceneNode, out_.m_iHealth, out_.m_lifeState, out_.m_iTeamNum, out_.m_hPawn,
-         static_cast<unsigned long long>(out_.localPlayerController),
-         static_cast<unsigned long long>(out_.viewMatrix));
+    Logger::instance().log("patterns: resolved ok=%d -> gs=0x%llx listOff=%d scene=%d health=%d life=%d team=%d "
+                           "hPawn=%d ctrl=0x%llx viewMatrix=0x%llx\n",
+                           out_.ok ? 1 : 0,
+                           static_cast<unsigned long long>(out_.gameEntitySystem), out_.entityListOffset,
+                           out_.m_pGameSceneNode, out_.m_iHealth, out_.m_lifeState, out_.m_iTeamNum, out_.m_hPawn,
+                           static_cast<unsigned long long>(out_.localPlayerController),
+                           static_cast<unsigned long long>(out_.viewMatrix));
     return out_.ok;
 }
 

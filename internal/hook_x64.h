@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <sys/mman.h>
 
+#include "logger.h"
+
 // ----------------------------------------------------------------------------
 // Minimal x86-64 inline-hook helper for the Vulkan loader dispatch stubs.
 //
@@ -130,14 +132,14 @@ inline bool install(Hook& out, void* fn, void* detour) {
     while (len < 16) {  // steal >= 16 bytes (patch writes 14) at instruction boundaries
         const int l = insn_len(p + len);
         if (l <= 0) {
-            std::fprintf(stderr, "hook64: cannot decode instruction at +%d (0x%02x)\n",
-                         patch_off + len, p[len]);
+            Logger::instance().error("hook64: cannot decode instruction at +%d (0x%02x)\n",
+                                     patch_off + len, p[len]);
             return false;
         }
         len += l;
     }
     if (len < 16) {
-        std::fprintf(stderr, "hook64: stub too short to patch\n");
+        Logger::instance().error("hook64: stub too short to patch\n");
         return false;
     }
 
@@ -234,7 +236,7 @@ inline bool install(Hook& out, void* fn, void* detour) {
     out.fn = fn;
     out.trampoline = tramp;
     out.stolen_len = len;
-    std::fprintf(stderr, "hook64: hooked %p (stolen %d bytes)\n", fn, len);
+    Logger::instance().log("hook64: hooked %p (stolen %d bytes)\n", fn, len);
     return true;
 }
 

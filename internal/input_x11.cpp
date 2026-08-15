@@ -1,5 +1,6 @@
 #include "input_x11.h"
 
+#include "logger.h"
 #include "overlay_ctx.h"
 
 #include <X11/Xlib.h>
@@ -11,21 +12,9 @@
 
 #include <unistd.h>
 
-#include <cstdarg>
 #include <cstdio>
 
 namespace {
-void xi_diag(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
-void xi_diag(const char* fmt, ...) {
-    FILE* f = std::fopen("/tmp/cs2_x11_diag.log", "a");  // separate file, no spam
-    if (!f) return;
-    va_list ap;
-    va_start(ap, fmt);
-    std::vfprintf(f, fmt, ap);
-    va_end(ap);
-    std::fclose(f);
-}
-
 Display* dpy = nullptr;
 Window root = 0;
 Window game_win = 0;
@@ -114,10 +103,10 @@ bool init() {
     if (key_aim && game_win)
         grab_aim = XGrabKey(dpy, key_aim, AnyModifier, root, True, GrabModeAsync, GrabModeAsync);
     XSync(dpy, False);
-    xi_diag("init: dpy=%p root=0x%lx game_win=0x%lx xi_ok=%d key_p=%d key_f1=%d key_aim=%d grab_p=%d grab_f1=%d grab_aim=%d\n",
-            static_cast<void*>(dpy), static_cast<unsigned long>(root),
-            static_cast<unsigned long>(game_win), xi_ok ? 1 : 0,
-            key_p, key_f1, key_aim, grab_p, grab_f1, grab_aim);
+    Logger::instance().log("input_x11: init dpy=%p root=0x%lx game_win=0x%lx xi_ok=%d key_p=%d key_f1=%d key_aim=%d grab_p=%d grab_f1=%d grab_aim=%d\n",
+                           static_cast<void*>(dpy), static_cast<unsigned long>(root),
+                           static_cast<unsigned long>(game_win), xi_ok ? 1 : 0,
+                           key_p, key_f1, key_aim, grab_p, grab_f1, grab_aim);
     return game_win != 0;
 }
 
@@ -225,7 +214,7 @@ void shutdown() {
     root = 0;
     game_win = 0;
     xi_ok = false;
-    std::fprintf(stderr, "input_x11: closed\n");
+    Logger::instance().log("input_x11: closed\n");
 }
 
 bool raw_tracking() { return xi_ok; }
