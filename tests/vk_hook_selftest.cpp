@@ -27,7 +27,7 @@ using CreateDeviceFn = VkResult (*)(VkPhysicalDevice, const VkDeviceCreateInfo*,
 extern "C" VkResult det_inst(const VkInstanceCreateInfo* ci, const VkAllocationCallbacks* ac,
                              VkInstance* out) {
     ++inst_calls;
-    const VkResult r = reinterpret_cast<CreateInstanceFn>(h_inst.trampoline)(ci, ac, out);
+    const VkResult r = reinterpret_cast<CreateInstanceFn>(h_inst.trampoline())(ci, ac, out);
     std::printf("  [detour] vkCreateInstance -> %d (trampoline ok)\n", r);
     return r;
 }
@@ -35,7 +35,7 @@ extern "C" VkResult det_inst(const VkInstanceCreateInfo* ci, const VkAllocationC
 extern "C" VkResult det_dev(VkPhysicalDevice pd, const VkDeviceCreateInfo* ci,
                             const VkAllocationCallbacks* ac, VkDevice* out) {
     ++dev_calls;
-    const VkResult r = reinterpret_cast<CreateDeviceFn>(h_dev.trampoline)(pd, ci, ac, out);
+    const VkResult r = reinterpret_cast<CreateDeviceFn>(h_dev.trampoline())(pd, ci, ac, out);
     std::printf("  [detour] vkCreateDevice -> %d device=%p\n", r, static_cast<void*>(*out));
     return r;
 }
@@ -51,14 +51,14 @@ __attribute__((noinline)) static int rip_fn(int x) {
 
 static int test_rip_relocation() {
     hook64::Hook h;
-    if (!hook64::install(h, reinterpret_cast<void*>(&rip_fn),
-                         reinterpret_cast<void*>(&rip_fn))) {
+    if (!h.install(reinterpret_cast<void*>(&rip_fn),
+                   reinterpret_cast<void*>(&rip_fn))) {
         std::printf("  [rip] hook install failed\n");
         return 1;
     }
     // Call the ORIGINAL through the trampoline (as a detour would).
     using Fn = int (*)(int);
-    const int r = reinterpret_cast<Fn>(h.trampoline)(5);
+    const int r = reinterpret_cast<Fn>(h.trampoline())(5);
     std::printf("  [rip] trampoline(5) = %d (expect 47)\n", r);
     return r == 47 ? 0 : 2;
 }
@@ -74,10 +74,10 @@ int main() {
 
     std::printf("installing hooks...\n");
     const bool ok_inst =
-        hook64::install(h_inst, dlsym(vk, "vkCreateInstance"),
+        h_inst.install(dlsym(vk, "vkCreateInstance"),
                         reinterpret_cast<void*>(det_inst));
     const bool ok_dev =
-        hook64::install(h_dev, dlsym(vk, "vkCreateDevice"),
+        h_dev.install(dlsym(vk, "vkCreateDevice"),
                         reinterpret_cast<void*>(det_dev));
     std::printf("hooks: vkCreateInstance=%d vkCreateDevice=%d\n", ok_inst, ok_dev);
     if (!ok_inst || !ok_dev) return 2;

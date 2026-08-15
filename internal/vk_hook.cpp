@@ -135,7 +135,7 @@ void VulkanHook::install_icd_hook() {
     if (!present || pointer_in_own_so(reinterpret_cast<std::uintptr_t>(present))) {
         Logger::instance().error("vk_hook: icd-hook: resolved present unusable (%p) - overlay disabled\n",
                                  reinterpret_cast<void*>(present));
-    } else if (hook64::install(h_icd_present_, reinterpret_cast<void*>(present),
+    } else if (h_icd_present_.install(reinterpret_cast<void*>(present),
                                reinterpret_cast<void*>(detour_present))) {
         icd_present_ = present;
         Logger::instance().log("vk_hook: inline-hooked real vkQueuePresentKHR at %p\n",
@@ -149,7 +149,7 @@ void VulkanHook::install_icd_hook() {
     CreateSwapchainFn swapchain =
         reinterpret_cast<CreateSwapchainFn>(real_gdpa_(dev, "vkCreateSwapchainKHR"));
     if (swapchain && !pointer_in_own_so(reinterpret_cast<std::uintptr_t>(swapchain))) {
-        if (hook64::install(h_icd_swapchain_, reinterpret_cast<void*>(swapchain),
+        if (h_icd_swapchain_.install(reinterpret_cast<void*>(swapchain),
                             reinterpret_cast<void*>(detour_create_swapchain_game)))
             Logger::instance().log("vk_hook: inline-hooked real vkCreateSwapchainKHR at %p\n",
                                    reinterpret_cast<void*>(swapchain));
@@ -170,7 +170,7 @@ void VulkanHook::install_icd_hook() {
 
 VkResult VulkanHook::on_create_instance(const VkInstanceCreateInfo* ci,
                                         const VkAllocationCallbacks* ac, VkInstance* out) {
-    const VkResult r = reinterpret_cast<CreateInstanceFn>(h_create_instance_.trampoline)(ci, ac, out);
+    const VkResult r = reinterpret_cast<CreateInstanceFn>(h_create_instance_.trampoline())(ci, ac, out);
     if (r == VK_SUCCESS) instance_ = *out;
     return r;
 }
@@ -178,7 +178,7 @@ VkResult VulkanHook::on_create_instance(const VkInstanceCreateInfo* ci,
 VkResult VulkanHook::on_create_device(VkPhysicalDevice pd, const VkDeviceCreateInfo* ci,
                                       const VkAllocationCallbacks* ac, VkDevice* out) {
     const VkResult r =
-        reinterpret_cast<CreateDeviceFn>(h_create_device_.trampoline)(pd, ci, ac, out);
+        reinterpret_cast<CreateDeviceFn>(h_create_device_.trampoline())(pd, ci, ac, out);
     if (r == VK_SUCCESS) {
         phys_ = pd;
         device_ = *out;
@@ -192,7 +192,7 @@ VkResult VulkanHook::on_create_swapchain(VkDevice dev, const VkSwapchainCreateIn
                                          const VkAllocationCallbacks* ac,
                                          VkSwapchainKHR* out) {
     const VkResult r =
-        reinterpret_cast<CreateSwapchainFn>(h_create_swapchain_.trampoline)(dev, ci, ac, out);
+        reinterpret_cast<CreateSwapchainFn>(h_create_swapchain_.trampoline())(dev, ci, ac, out);
     if (r == VK_SUCCESS) {
         swapchain_ = *out;
         format_ = ci->imageFormat;
@@ -212,7 +212,7 @@ VkResult VulkanHook::on_create_swapchain_game(VkDevice dev,
                                               const VkAllocationCallbacks* ac,
                                               VkSwapchainKHR* out) {
     const VkResult r =
-        reinterpret_cast<CreateSwapchainFn>(h_icd_swapchain_.trampoline)(dev, ci, ac, out);
+        reinterpret_cast<CreateSwapchainFn>(h_icd_swapchain_.trampoline())(dev, ci, ac, out);
     if (r == VK_SUCCESS) {
         device_ = dev;
         swapchain_ = *out;
@@ -241,12 +241,12 @@ VkResult VulkanHook::on_present(VkQueue queue, const VkPresentInfoKHR* pi) {
     // icd_present_ points at the patched function (its code starts with a
     // jump to us), so we must go through the trampoline to avoid recursion.
     auto real_present = [&](VkQueue q, const VkPresentInfoKHR* p) -> VkResult {
-        if (h_icd_present_.trampoline)
-            return reinterpret_cast<PresentFn>(h_icd_present_.trampoline)(q, p);
+        if (h_icd_present_.trampoline())
+            return reinterpret_cast<PresentFn>(h_icd_present_.trampoline())(q, p);
         if (icd_present_ && icd_present_ != reinterpret_cast<IcdPresentFn>(detour_present))
             return icd_present_(q, p);
-        if (h_present_.trampoline)
-            return reinterpret_cast<PresentFn>(h_present_.trampoline)(q, p);
+        if (h_present_.trampoline())
+            return reinterpret_cast<PresentFn>(h_present_.trampoline())(q, p);
         return VK_ERROR_DEVICE_LOST;
     };
 
@@ -490,9 +490,9 @@ void VulkanHook::install() {
     }
     real_igpa_ = reinterpret_cast<PFN_vkGetInstanceProcAddr>(dlsym(vk, "vkGetInstanceProcAddr"));
     real_gdpa_ = reinterpret_cast<PFN_vkGetDeviceProcAddr>(dlsym(vk, "vkGetDeviceProcAddr"));
-    hook64::install(h_create_instance_, dlsym(vk, "vkCreateInstance"),
+    h_create_instance_.install(dlsym(vk, "vkCreateInstance"),
                     reinterpret_cast<void*>(detour_create_instance));
-    hook64::install(h_create_device_, dlsym(vk, "vkCreateDevice"),
+    h_create_device_.install(dlsym(vk, "vkCreateDevice"),
                     reinterpret_cast<void*>(detour_create_device));
     hooked_ = true;
     Logger::instance().log("vk_hook: loader resolved, installing ICD hooks\n");
@@ -500,10 +500,10 @@ void VulkanHook::install() {
 }
 
 void VulkanHook::uninstall() {
-    hook64::uninstall(h_icd_present_);
-    hook64::uninstall(h_icd_swapchain_);
-    hook64::uninstall(h_create_instance_);
-    hook64::uninstall(h_create_device_);
+    h_icd_present_.uninstall();
+    h_icd_swapchain_.uninstall();
+    h_create_instance_.uninstall();
+    h_create_device_.uninstall();
     hooked_ = false;
     Logger::instance().log("vk_hook: uninstalled\n");
 }

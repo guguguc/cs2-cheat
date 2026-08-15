@@ -15,11 +15,32 @@ needed and recoil compensation works like a real mouse).
 
 | Feature | Implementation |
 |---|---|
-| ESP: box + health + skeleton | ImGui drawn into the game's Vulkan swapchain (`internal/vk_hook.cpp` + `internal/overlay_draw.cpp`) |
-| Aimbot (FOV-limited, smoothed, inertia) | uinput virtual mouse (TI-84 disguise), deadlocked-style recoil compensation, auto-fire on lock |
-| Triggerbot | optional, same uinput device |
+| ESP: box + health bar + skeleton + head circle | ImGui drawn into the game's Vulkan swapchain (`internal/vk_hook.cpp` + `internal/overlay_draw.cpp`) |
+| ESP visibility colors | per-player BVH line-of-sight; visible = red, hidden = blue |
+| Aimbot (FOV-limited, smoothed, inertia, BVH visibility check) | uinput virtual mouse (TI-84 disguise), targets the head bone |
+| Triggerbot | delayed fire via uinput (flash / speed / head-only checks) |
+| Standalone RCS | independent recoil compensation with adjustable strength |
 | Offset resolution | Osiris-style pattern scans on the live binary + JSON config (`config/cs2_config.json`) |
+| Unified logging | thread-safe `Logger` to `/tmp/cs2_internal.log` |
 | Unload | remote `unload_self` + `injector`-based unloader tool (restores hooks, releases X11 grabs) |
+
+## Hooked Vulkan functions
+
+The SO installs four inline hooks. `vkCreateInstance` / `vkCreateDevice` are
+patched on the loader stubs; because the game calls the real ICD functions
+directly (cached pointers bypass the loader), `vkQueuePresentKHR` and
+`vkCreateSwapchainKHR` are patched **in the ICD code itself** (each preserved
+`endbr64` keeps indirect calls IBT/CET-compliant).
+
+| Function | Patched at | Detour | Purpose |
+|---|---|---|---|
+| `vkCreateInstance` | loader stub | `detour_create_instance` | capture the `VkInstance` |
+| `vkCreateDevice` | loader stub | `detour_create_device` | capture physical device / device / queue family |
+| `vkQueuePresentKHR` | real ICD (inline) | `detour_present` | render the ImGui overlay before presenting |
+| `vkCreateSwapchainKHR` | real ICD (inline) | `detour_create_swapchain_game` | (re)init the overlay when the game rebuilds its swapchain |
+
+The hook machinery itself (`hook64::Hook`, trampoline allocation + RIP-reloc)
+lives in `internal/hook_x64.{h,cpp}` and is verified by `hook64_test`.
 
 ## Build
 
@@ -32,7 +53,8 @@ cmake --build build -j
 ```
 
 Produces `build/libcs2_internal.so` plus selftests
-(`./build/vk_hook_selftest`, `./build/hook64_test`, `./build/scan_test`).
+(`./build/vk_hook_selftest`, `./build/hook64_test`, `./build/scan_test`,
+`./build/math_test`).
 
 ## Inject & run
 
@@ -46,8 +68,9 @@ On load the library:
 1. spawns a data thread that pattern-scans the live binary and resolves
    offsets (paths/config in `config/cs2_config.json`, `CS2_CONFIG` env
    overrides the path),
-2. inline-hooks `vkCreateInstance` / `vkCreateDevice` /
-   `vkCreateSwapchainKHR` / `vkQueuePresentKHR` in `libvulkan.so.1`,
+2. inline-hooks `vkCreateInstance` / `vkCreateDevice` on the loader and the
+   real `vkQueuePresentKHR` / `vkCreateSwapchainKHR` in the ICD (see the
+   "Hooked Vulkan functions" table),
 3. initializes the ImGui overlay on the next swapchain (re)creation,
 4. opens an X11 connection to find the game window (`_NET_WM_PID`, recursive
    tree walk — required on GNOME/Mutter which reparents X11 windows),
@@ -57,10 +80,10 @@ Controls:
 
 - `F1` (or `p`) — toggle the menu panel
 - hold `x` — aimbot (key grabbed globally via XGrabKey)
-- menu toggles ESP / aimbot / triggerbot, FOV, smooth, etc.
+- menu toggles ESP / aimbot / triggerbot / RCS, FOV, smooth, etc.
 
-Progress/errors go to `/tmp/cs2_internal.log`. X11 grab diagnostics go to
-`/tmp/cs2_x11_diag.log`.
+Progress/errors go to `/tmp/cs2_internal.log` (single unified log, see
+`src/logger.cpp`).
 
 ### Unload (so you can re-inject)
 
@@ -97,53 +120,62 @@ cd cs2-dumper && cargo build --release
 then copy the relevant values into `config/cs2_config.json` (or run
 `scripts/dump_local.sh` for a local dump helper).
 
+### Offset version
+
+Current offsets in `config/cs2_config.json` are based on the **2026-08-13**
+cs2-dumper output. `data/dump/` holds the **2026-08-12** schema dumps
+(`info.json` timestamp) used as a reference for the field layout; refresh both
+after every game update.
+
 ## How it works
+
+The library is a set of collaborating classes, all created inside the injected
+SO. The **data thread** reads the game state and drives the aim features; the
+**Vulkan present hook** renders the overlay into the swapchain image.
 
 ```
 cs2 process
    │  injected libcs2_internal.so
-   ├── data thread ──► patterns::resolve (live pattern scan)
-   │                    Memory reads (process_vm_readv, no ptrace attach)
-   │                    Game: local pawn, view matrix/angles, CEntityList
-   │                    bones: pawn → CGameSceneNode → CSkeletonInstance
-   │                    aimbot: CalcAngle(head) → FOV → inertia → uinput move
-   └── vk_hook ──► detour_present → ImGui (ESP + panel) into swapchain
+   │
+   ├─ data thread (entry.cpp)
+   │    OffsetResolver.attach(pid)      → live pattern scan (libclient.so)
+   │    Game game(mem)                  → pawn, view matrix/angles, CEntityList
+   │        ├── Aimbot(game)            → CalcAngle(head) → FOV → visibility (BVH)
+   │        ├── Triggerbot(game)        → delayed fire, flash/speed/head checks
+   │        ├── Rcs(game)               → independent recoil compensation
+   │        └── MouseDevice g_mouse     → /dev/uinput virtual mouse (aim + fire)
+   │    check_bvh(aimbot, mem, off)     → map-change BVH reload (200 ms)
+   │    Logger::instance()              → /tmp/cs2_internal.log
+   │
+   └─ VulkanHook g_vk_hook (present hook)
+         ├─ hook64::Hook × 4           → loader stubs + real ICD functions
+         ├─ on_present()                → every frame before vkQueuePresentKHR
+         │     ├── ImGuiRenderer        → ImGui_ImplVulkan_NewFrame/Render
+         │     └── Overlay g_overlay    → ESP boxes/bones/health + control panel
+         └─ on_create_swapchain_game()  → (re)init overlay on swapchain rebuild
 ```
+
+Dependency injection keeps the classes decoupled: `Game` owns the `Memory`
+handle, and `Aimbot` / `Triggerbot` / `Rcs` are constructed with a `Game&`, so
+no feature method takes a `Game`/`Memory` parameter. `Overlay` / `MouseDevice` /
+`VulkanHook` / `ImGuiRenderer` are process-wide singletons (`g_overlay`,
+`g_mouse`, `g_vk_hook`).
 
 Key files:
 
 | File | Purpose |
 |---|---|
 | `internal/entry.cpp` | constructor, data thread, unload_self |
-| `internal/vk_hook.cpp` / `hook_x64.h` | Vulkan loader inline hooks + trampolines |
+| `internal/vk_hook.cpp` / `hook_x64.{h,cpp}` | Vulkan loader + ICD inline hooks (`hook64::Hook`) |
+| `internal/imgui_renderer.cpp` | ImGui context / Vulkan backend / theme |
+| `internal/overlay_draw.cpp` | ImGui ESP (box/skeleton/health) + control panel |
+| `internal/mouse_device.cpp` | uinput virtual mouse + smoothed movement |
 | `internal/input_x11.cpp` | game-window lookup, key grabs, raw mouse for the menu |
-| `internal/uinput_aim.cpp` | virtual mouse creation + smoothed movement |
-| `internal/overlay_draw.cpp` | ImGui ESP (box/skeleton) + control panel |
 | `src/patterns.cpp` | pattern scanning of the live binary |
-| `src/cfg.cpp` | JSON config loading (loaded once) |
-| `src/aimbot.cpp` / `src/trigger.cpp` | aim/recoil logic, triggerbot |
-| `scripts/check_layout.sh` | layout-stability check vs saved baseline |
-
-## Layout sensitivity (read before editing)
-
-This cheat is **sensitive to .text layout shifts**. A verified experiment:
-adding one never-called dead function shifted every function address and
-reproduced a "mouse breaks after inject" bug; reverting it fixed the mouse.
-Root cause is still under investigation — treat ANY layout shift as a release
-blocker:
-
-```sh
-scripts/check_layout.sh --save   # after verifying a good build
-scripts/check_layout.sh          # after each build; fails if layout moved
-```
-
-Known triggers:
-
-- `constexpr float k = 1.0f` lets the compiler fold `x*1.0` away, shrinking
-  `move_to()` and shifting every subsequent function — keep
-  `kFracPerFrame = 0.5f` (or move the constant to another TU with external
-  linkage and verify with the script).
-- Any added/removed function changes addresses; run the script after changes.
+| `src/cfg.cpp` | JSON config loading |
+| `src/logger.cpp` | thread-safe unified logger |
+| `src/aimbot.cpp` / `src/trigger.cpp` / `src/rcs.cpp` | aim / triggerbot / recoil classes |
+| `src/game.cpp` | game state reads (players, weapons, bones) |
 
 ## Compositor / desktop notes
 
@@ -167,16 +199,14 @@ differences matter.
   more easily and fights the game's own prediction; a virtual mouse behaves
   like real input, supports raw-input matches, and recoil compensation just
   works.
-- **Why is the aim slow / not hitting?** `kFracPerFrame` halves the movement
-  per frame by design (a full-speed 1.0 build is what shifted the layout and
-  broke the mouse). Tune FOV / smooth / inertia in the menu; refresh offsets
-  after every game update.
+- **Why is the aim slow / not hitting?** Tune FOV / smooth / RCS strength in
+  the menu; refresh offsets after every game update.
 - **The overlay is not showing.** Inject earlier (before the swapchain
   exists) or recreate the swapchain: toggle fullscreen / resize / join a
   match.
 - **F1 does nothing on GNOME.** Re-inject with the current build — the
   recursive window lookup fixes Mutter's reparenting (old builds logged
-  `game_win=0x0` in `/tmp/cs2_x11_diag.log`).
+  `game_win=0x0` in `/tmp/cs2_internal.log`).
 
 ## License
 
