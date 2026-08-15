@@ -170,12 +170,15 @@ void data_thread() {
         uinput_aim::set_local_pawn(game.local_pawn());
         check_bvh(mem, off);  // deadlocked-style: 200 ms, map-change triggered
 
-        bool aim = false, trig = false;
+        bool aim = false, trig = false, rcs_on = false;
         float fov = 12.f, sm = 6.f;
+        float rcs_strength = 0.5f;
         {
             std::lock_guard<std::mutex> lk(g_ctx.mtx);
             aim = g_ctx.aim_on;  // menu checkbox and X key are kept in sync
             trig = g_ctx.trigger_on;
+            rcs_on = g_ctx.rcs_on;
+            rcs_strength = g_ctx.rcs_strength;
             fov = g_ctx.aim_fov;
             sm = g_ctx.aim_smooth;
         }
@@ -194,7 +197,7 @@ void data_thread() {
             log_("aim: %s (aim_on=%d aim_toggle=%d)\n", aim ? "ACTIVE" : "off",
                  g_ctx.aim_on ? 1 : 0, g_ctx.aim_toggle ? 1 : 0);
         }
-        rcs.run(game, mem, g_ctx.rcs_on);          // recoil control (independent)
+        rcs.run(game, mem, rcs_on, rcs_strength);  // recoil control (independent)
         trigger.run(game, mem, trig, fire_now);    // schedule (delayed shot)
         trigger.run_shoot();                       // drive the button
 

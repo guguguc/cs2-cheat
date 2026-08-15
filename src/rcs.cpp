@@ -69,7 +69,7 @@ void record_accel(std::deque<Vector2>& h, const Vector2& v) {
 
 }  // namespace
 
-void Rcs::run(Game& game, const Memory& mem, bool enabled) {
+void Rcs::run(Game& game, const Memory& mem, bool enabled, float strength) {
     if (!enabled || !game.attached() || !game.local_pawn()) return;
     const Player& local = game.local();
     if (!local.alive) return;
@@ -134,10 +134,10 @@ void Rcs::run(Game& game, const Memory& mem, bool enabled) {
     };
     prev_punch_ = aim_punch;
 
-    const float strength = 0.5f;  // default (menu will override)
+    strength = std::clamp(strength, 0.f, 1.f);
     const Vector2 desired{
-        mouse_angle.x * std::clamp(strength, 0.f, 1.f) + unaccounted_.x,
-        mouse_angle.y * std::clamp(strength, 0.f, 1.f) + unaccounted_.y,
+        mouse_angle.x * strength + unaccounted_.x,
+        mouse_angle.y * strength + unaccounted_.y,
     };
 
     const Vector2 raw_accel{desired.x - velocity_.x, desired.y - velocity_.y};

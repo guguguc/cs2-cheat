@@ -11,8 +11,9 @@
 // a locked target. Uses acceleration clamping + strength scaling.
 class Rcs {
 public:
-    // Called every frame from the data thread. enabled = menu RCS switch.
-    void run(Game& game, const Memory& mem, bool enabled);
+    // Called every frame from the data thread. enabled = menu RCS switch,
+    // strength = 0..1 compensation amount from the panel.
+    void run(Game& game, const Memory& mem, bool enabled, float strength);
 
 private:
     Vector2 prev_punch_{};
