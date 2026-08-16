@@ -35,12 +35,6 @@ extern "C" VkResult detour_create_device(VkPhysicalDevice pd, const VkDeviceCrea
     return g_vk_hook.on_create_device(pd, ci, ac, out);
 }
 
-extern "C" VkResult detour_create_swapchain(VkDevice dev, const VkSwapchainCreateInfoKHR* ci,
-                                            const VkAllocationCallbacks* ac,
-                                            VkSwapchainKHR* out) {
-    return g_vk_hook.on_create_swapchain(dev, ci, ac, out);
-}
-
 extern "C" VkResult detour_create_swapchain_game(VkDevice dev,
                                                  const VkSwapchainCreateInfoKHR* ci,
                                                  const VkAllocationCallbacks* ac,
@@ -188,21 +182,6 @@ VkResult VulkanHook::on_create_device(VkPhysicalDevice pd, const VkDeviceCreateI
     return r;
 }
 
-VkResult VulkanHook::on_create_swapchain(VkDevice dev, const VkSwapchainCreateInfoKHR* ci,
-                                         const VkAllocationCallbacks* ac,
-                                         VkSwapchainKHR* out) {
-    const VkResult r =
-        reinterpret_cast<CreateSwapchainFn>(h_create_swapchain_.trampoline())(dev, ci, ac, out);
-    if (r == VK_SUCCESS) {
-        swapchain_ = *out;
-        format_ = ci->imageFormat;
-        extent_ = ci->imageExtent;
-        image_count_ = ci->minImageCount;
-        ready_ = false;
-    }
-    return r;
-}
-
 // Inline-hooked copy of the REAL vkCreateSwapchainKHR the game calls. Captures
 // the swapchain format/device/extent when the game (re)creates its swapchain,
 // which lets the overlay initialize even if it was injected after the current
@@ -245,8 +224,6 @@ VkResult VulkanHook::on_present(VkQueue queue, const VkPresentInfoKHR* pi) {
             return reinterpret_cast<PresentFn>(h_icd_present_.trampoline())(q, p);
         if (icd_present_ && icd_present_ != reinterpret_cast<IcdPresentFn>(detour_present))
             return icd_present_(q, p);
-        if (h_present_.trampoline())
-            return reinterpret_cast<PresentFn>(h_present_.trampoline())(q, p);
         return VK_ERROR_DEVICE_LOST;
     };
 

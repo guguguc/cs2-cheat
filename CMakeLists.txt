@@ -15,6 +15,7 @@ find_package(X11 QUIET)
 if(Vulkan_FOUND AND X11_FOUND)
     add_library(cs2_internal SHARED
         internal/entry.cpp
+        internal/game_loop.cpp
         internal/hook_x64.cpp
         internal/imgui_renderer.cpp
         internal/mouse_device.cpp

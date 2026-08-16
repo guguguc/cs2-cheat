@@ -27,8 +27,6 @@ public:
                                 const VkAllocationCallbacks* ac, VkInstance* out);
     VkResult on_create_device(VkPhysicalDevice pd, const VkDeviceCreateInfo* ci,
                               const VkAllocationCallbacks* ac, VkDevice* out);
-    VkResult on_create_swapchain(VkDevice dev, const VkSwapchainCreateInfoKHR* ci,
-                                 const VkAllocationCallbacks* ac, VkSwapchainKHR* out);
     VkResult on_create_swapchain_game(VkDevice dev, const VkSwapchainCreateInfoKHR* ci,
                                       const VkAllocationCallbacks* ac, VkSwapchainKHR* out);
     VkResult on_present(VkQueue queue, const VkPresentInfoKHR* pi);
@@ -71,9 +69,7 @@ private:
     IcdPresentFn icd_present_ = nullptr;
 
     // --- inline hooks ---------------------------------------------------------
-    hook64::Hook h_present_;
     hook64::Hook h_create_device_;
-    hook64::Hook h_create_swapchain_;
     hook64::Hook h_create_instance_;
     hook64::Hook h_icd_present_;    // inline hook on the real vkQueuePresentKHR
     hook64::Hook h_icd_swapchain_;  // inline hook on the real vkCreateSwapchainKHR

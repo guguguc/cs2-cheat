@@ -1,17 +1,8 @@
-#include "aimbot.h"
-#include "cfg.h"
-#include "game.h"
+#include "game_loop.h"
 #include "input_x11.h"
 #include "logger.h"
-#include "memory.h"
 #include "mouse_device.h"
-#include "offsets.h"
 #include "overlay_ctx.h"
-#include "rcs.h"
-#include "patterns.h"
-#include "process.h"
-#include "process.h"
-#include "trigger.h"
 #include "vk_hook.h"
 
 #include <X11/Xlib.h>
@@ -19,14 +10,8 @@
 #include <unistd.h>
 
 #include <atomic>
-#include <chrono>
 #include <cstdio>
-#include <fstream>
-#include <mutex>
-#include <optional>
-#include <string>
 #include <thread>
-#include <unordered_map>
 
 SharedCtx g_ctx;
 
@@ -39,182 +24,6 @@ std::atomic<bool> g_run{true};
 // the library under it.
 std::atomic<bool> g_thread_done{false};
 
-// Scans the ICvar convar list for "sensitivity" (deadlocked-style).
-// libtier0.so exports VEngineCvar007 (interface table at base + kCvarIfaceOff);
-// each convar object has a name pointer at +0x0 and its float value at +0x58.
-std::uintptr_t find_sensitivity_convar(const Memory& mem) {
-    const auto tier0 = module_base(mem.pid(), "libtier0.so");
-    if (!tier0) { Logger::instance().log("convar: no libtier0\n"); return 0; }
-    constexpr std::uintptr_t kCvarIfaceOff = 1423200;  // VEngineCvar007 (dumper 2026-08-13)
-    const auto iface = mem.read<std::uintptr_t>(*tier0 + kCvarIfaceOff).value_or(0);
-    if (!iface) { Logger::instance().log("convar: no cvar interface\n"); return 0; }
-    const auto objects = mem.read<std::uintptr_t>(iface + 0x50).value_or(0);
-    const std::uint32_t count = mem.read<std::uint32_t>(iface + 160).value_or(0);
-    if (!objects || !count) { Logger::instance().log("convar: empty list (count=%u)\n", count); return 0; }
-    for (std::uint32_t i = 0; i < count && i < 4096; ++i) {
-        const auto obj = mem.read<std::uintptr_t>(objects + i * 16).value_or(0);
-        if (!obj) break;
-        const auto name_addr = mem.read<std::uintptr_t>(obj).value_or(0);
-        if (!name_addr) continue;
-        char buf[32] = {0};
-        mem.read(name_addr, buf, sizeof(buf) - 1);
-        if (std::string(buf) == "sensitivity") {
-            Logger::instance().log("convar: sensitivity at 0x%llx\n", static_cast<unsigned long long>(obj));
-            return obj;
-        }
-    }
-    Logger::instance().log("convar: sensitivity not found (count=%u)\n", count);
-    return 0;
-}
-
-// deadlocked check_bvh equivalent: every 200 ms, if the map name (read from
-// global_vars+0x198, same as deadlocked current_map()) changed, reload the
-// BVH. Reload only happens after entering a match; retries automatically
-// until read_map succeeds (failed loads do not remember the map name).
-std::string read_cstr(const Memory& mem, std::uintptr_t addr) {
-    if (!addr) return {};
-    char buf[128] = {0};
-    mem.read(addr, buf, sizeof(buf) - 1);
-    return std::string(buf);
-}
-
-void check_bvh(Aimbot& aimbot, const Memory& mem, const patterns::Resolved& off) {
-    static std::string last_map;
-    static auto last_check = std::chrono::steady_clock::now();
-    if (std::chrono::steady_clock::now() - last_check < std::chrono::milliseconds(200)) return;
-    last_check = std::chrono::steady_clock::now();
-    if (!off.globalVars || !off.vphysWorld) return;
-    const auto gv = mem.read<std::uintptr_t>(off.globalVars).value_or(0);
-    if (!gv) return;
-    const auto name_ptr = mem.read<std::uintptr_t>(gv + 0x198).value_or(0);
-    const std::string map = read_cstr(mem, name_ptr);
-    if (map == last_map) return;
-    last_map = map;
-    if (aimbot.init_bvh(off.vphysWorld, /*force=*/true)) {
-        // loaded ok (fresh geometry for the new map)
-    } else {
-        last_map.clear();  // failed: retry next 200 ms cycle
-    }
-}
-
-void data_thread() {
-    Logger::instance().log("data_thread: start\n");
-    Memory mem;
-    mem.attach(getpid());
-    patterns::OffsetResolver offsets;
-    if (!offsets.attach(getpid())) {
-        Logger::instance().log("entry: pattern resolve failed; retrying in background\n");
-        for (int i = 0; i < 20 && !offsets.ok(); ++i) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-            offsets.attach(getpid());
-        }
-    }
-    if (!offsets.ok()) {
-        g_thread_done.store(true);
-        return;
-    }
-    const patterns::Resolved& off = offsets.resolved();
-
-    Game game(mem);
-    if (!game.attach(off)) {
-        Logger::instance().log("entry: game attach failed\n");
-        g_thread_done.store(true);
-        return;
-    }
-    Logger::instance().log("entry: attached, offsets ok, client base 0x%llx\n",
-                           static_cast<unsigned long long>(game.client_base()));
-
-    // Input object: the live view angles are mirrored at +0x9C.
-    const std::uintptr_t input_obj =
-        mem.read<std::uintptr_t>(game.client_base() + Config::instance().offsets.dwCSGOInput)
-            .value_or(0);
-    if (input_obj) {
-        game.set_view_angle_source(input_obj + Config::instance().offsets.viewAngleOffset);  // real view angles
-        g_mouse.set_input_obj(input_obj);
-        g_mouse.set_sensitivity_convar(find_sensitivity_convar(mem));
-        // Create the virtual device lazily on first aim (in-match, so it never
-        // collides with the game's raw-input init) and keep it alive (no
-        // destroy -> no pointer-warp self-move on release).
-        game.set_angles_override([](const Vector3& a, bool) {
-            g_mouse.move_to(a.x, a.y);
-        });
-        Logger::instance().log("aim: uinput ready (input_obj=0x%llx)\n",
-                               static_cast<unsigned long long>(input_obj));
-    } else {
-        Logger::instance().log("input: no input object (dwCSGOInput null)\n");
-        game.set_angles_override([](const Vector3&, bool) {});
-    }
-
-    Triggerbot trigger(game);
-    Rcs rcs(game);
-    Aimbot aimbot(game);
-    std::unordered_map<std::uintptr_t, bool> visibility_cache;
-    auto next_visibility_update = std::chrono::steady_clock::time_point{};
-    while (g_run.load()) {
-        game.update();
-        check_bvh(aimbot, mem, off);  // deadlocked-style: 200 ms, map-change triggered
-
-        // BVH visibility involves several remote memory reads and ray casts per
-        // player. Keep it off the render/input lock and refresh it at a lower
-        // rate so ESP coloring cannot stall the game's mouse or ImGui frame.
-        Snapshot snapshot = game.snapshot();
-        const auto now = std::chrono::steady_clock::now();
-        if (now >= next_visibility_update) {
-            visibility_cache.clear();
-            for (const Player& p : snapshot.players)
-                visibility_cache[p.address] = aimbot.visible(p);
-            next_visibility_update = now + std::chrono::milliseconds(200);
-        }
-        for (Player& p : snapshot.players) {
-            const auto it = visibility_cache.find(p.address);
-            p.visible = it != visibility_cache.end() && it->second;
-        }
-
-        {
-            std::lock_guard<std::mutex> lk(g_ctx.mtx);
-            g_ctx.snap = std::move(snapshot);
-            g_ctx.valid = game.local_pawn() != 0;
-        }
-
-        g_mouse.set_local_pawn(game.local_pawn());
-
-        bool aim = false, trig = false, rcs_on = false;
-        float fov = 12.f, sm = 6.f;
-        float rcs_strength = 0.5f;
-        {
-            std::lock_guard<std::mutex> lk(g_ctx.mtx);
-            aim = g_ctx.aim_on;  // menu checkbox and X key are kept in sync
-            trig = g_ctx.trigger_on;
-            rcs_on = g_ctx.rcs_on;
-            rcs_strength = g_ctx.rcs_strength;
-            fov = g_ctx.aim_fov;
-            sm = g_ctx.aim_smooth;
-        }
-        const bool steered = aimbot.run(aim, fov, sm);
-        {
-            std::lock_guard<std::mutex> lk(g_ctx.mtx);
-            g_ctx.aim_active = steered;  // screen hint: aiming right now
-        }
-        bool fire_now = false;
-
-        if (steered)
-            Logger::instance().log("aimbot: steered (aim=%d)\n", aim ? 1 : 0);
-        static bool last_aim = false;
-        if (aim != last_aim) {
-            last_aim = aim;
-            Logger::instance().log("aim: %s (aim_on=%d aim_toggle=%d)\n", aim ? "ACTIVE" : "off",
-                                   g_ctx.aim_on ? 1 : 0, g_ctx.aim_toggle ? 1 : 0);
-        }
-        rcs.run(rcs_on, rcs_strength);             // recoil control (independent)
-        trigger.run(trig, fire_now);               // schedule (delayed shot)
-        trigger.run_shoot();                       // drive the button
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
-    }
-    g_thread_done.store(true);
-    Logger::instance().log("data_thread: exited\n");
-}
-
 }  // namespace
 
 __attribute__((constructor)) static void so_entry() {
@@ -223,7 +32,11 @@ __attribute__((constructor)) static void so_entry() {
     // Multiple threads use Xlib connections (input_x11 + xtest_aim).
     XInitThreads();
     input_x11::init();
-    std::thread(data_thread).detach();
+    std::thread([] {
+        GameLoop loop(g_run);
+        if (loop.init()) loop.run();
+        g_thread_done.store(true);
+    }).detach();
     g_vk_hook.install();
 }
 

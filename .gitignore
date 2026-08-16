@@ -16,3 +16,5 @@ data/
 *.nam
 *.til
 imgui.ini
+__pycache__/
+*.pyc
