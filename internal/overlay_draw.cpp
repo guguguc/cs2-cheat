@@ -294,6 +294,11 @@ void Overlay::panel(SharedCtx& ctx) const {
         }
         if (ctx.aim_on) {
             ui_toggle("Visibility check", &ctx.visibility_check);
+            const bool prev_rc = ctx.aim_recoil;
+            ui_toggle("Recoil comp", &ctx.aim_recoil);
+            // mutually exclusive with the standalone RCS: turning recoil comp
+            // on disables RCS (and vice versa) so they never double-compensate.
+            if (ctx.aim_recoil && !prev_rc) ctx.rcs_on = false;
         }
         ImGui::Spacing();
         ImGui::Separator();
@@ -325,8 +330,13 @@ void Overlay::panel(SharedCtx& ctx) const {
         ImGui::Separator();
         ImGui::Spacing();
         ImGui::TextDisabled("RECOIL CONTROL (RCS)");
+        const bool prev_rcs = ctx.rcs_on;
         ui_toggle("RCS", &ctx.rcs_on);
-        if (ctx.rcs_on) {
+        // mutually exclusive with the aimbot's recoil comp (AIM tab)
+        if (ctx.rcs_on && !prev_rcs) ctx.aim_recoil = false;
+        if (ctx.aim_recoil)
+            ImGui::TextDisabled("disabled: 'Recoil comp' is on (AIM tab)");
+        else if (ctx.rcs_on) {
             ImGui::SliderFloat("Strength", &ctx.rcs_strength, 0.f, 1.f, "%.2f");
         }
     }

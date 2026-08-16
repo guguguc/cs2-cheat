@@ -117,10 +117,32 @@ bool Aimbot::run(bool enabled, float fov_deg, float smooth) {
         g_ctx.aim_target_world = best->head;  // hint box follows this target
     }
 
-    // Recoil compensation is handled by the independent RCS module (src/rcs.cpp)
-    // exactly like deadlocked - the aimbot only steers toward the head.
+    // Recoil compensation (deadlocked angle_to_target): when g_ctx.aim_recoil
+    // is on, aim at `CalcAngle(head) - punch*2` so the recoil-raised crosshair
+    // still lands on the head. This is a per-frame correction inside the
+    // aimbot; it is mutually exclusive with the standalone RCS (see the menu
+    // / game_loop.cpp) to avoid double compensation.
     const Vector3 target_angle = CalcAngle(eye, best->head);
     Vector3 comp = target_angle;
+    if (g_ctx.aim_recoil) {
+        Vector3 punch{};
+        const int shots = game_.memory().read<int>(
+            game_.local_pawn() + Config::instance().offsets.m_iShotsFired).value_or(0);
+        if (read_aim_punch(punch)) {
+            punch = punch * 2.f;  // engine stores half the real punch
+            const std::string wname = game_.weapon_name();
+            const bool sniper = (wname == "awp" || wname == "g3sg1" ||
+                                 wname == "scar20" || wname == "ssg08");
+            if (sniper) {
+                punch = {};
+            } else if (punch.Length() == 0.f && shots > 1) {
+                punch = prev_punch_;  // mid-spray zero read: keep previous (deadlocked)
+            }
+            prev_punch_ = punch;
+        }
+        comp.x -= punch.x;
+        comp.y -= punch.y;
+    }
     ClampAngle(comp);
     game_.set_view_angles(comp);
     return true;

@@ -18,6 +18,14 @@ namespace {
 // deadlocked: 1 / (sensitivity * 0.022) = counts per degree.
 float counts_per_deg(float sens) { return 1.0f / (sens * 0.022f); }
 
+// --- P0-2 adaptive-smooth tuning -------------------------------------------
+// The menu smooth is the *fine-adjustment* setting near the target. As the
+// angular error grows, the effective smooth shrinks (faster approach) so the
+// crosshair catches up to moving targets instead of trailing behind them.
+constexpr float kErrScale = 10.f;   // error (deg) at which smooth is halved
+constexpr float kSnapDeg   = 0.5f;  // error below this: snap onto the head
+constexpr int   kSnapMaxCounts = 2; // per-frame step inside the snap zone
+
 }  // namespace
 
 MouseDevice g_mouse;
@@ -125,14 +133,41 @@ void MouseDevice::move_to(float target_pitch, float target_yaw) {
     // deadlocked movement: angle error -> counts (45.45 = 1/0.022), divided by
     // (smooth+1), then an inertia low-pass filter so the crosshair glides
     // instead of jumping. Live sensitivity includes the zoom multiplier.
+    //
+    // P0-2: adaptive smoothing. Large angular errors shrink the effective
+    // smooth (fast approach, so we catch moving targets), small errors use the
+    // full menu smooth (fine adjustment). Inside the snap zone the inertia
+    // filter is bypassed and the crosshair walks straight onto the head a few
+    // counts per frame, so it settles exactly on target instead of hovering
+    // just off it.
     const float cpd = counts_per_deg(live_sensitivity());
     const float smooth = std::clamp(g_ctx.aim_smooth, 1.f, 20.f);
-    const float target_dx = -d_yaw * cpd / (smooth + 1.f);
-    const float target_dy = d_pitch * cpd / (smooth + 1.f);
-    inertia_dx_ += (target_dx - inertia_dx_) * 0.5f;
-    inertia_dy_ += (target_dy - inertia_dy_) * 0.5f;
-    int dx = static_cast<int>(inertia_dx_);
-    int dy = static_cast<int>(inertia_dy_);
+    const float err_deg = std::sqrt(d_yaw * d_yaw + d_pitch * d_pitch);
+
+    int dx = 0, dy = 0;
+    if (err_deg < kSnapDeg) {
+        // Snap zone: move directly (bypass inertia) in small steps. The
+        // truncation to +-kSnapMaxCounts keeps it from jumping, and once the
+        // remaining error is below one count the movement naturally stops.
+        dx = std::clamp(static_cast<int>(std::lround(-d_yaw * cpd)), -kSnapMaxCounts,
+                        kSnapMaxCounts);
+        dy = std::clamp(static_cast<int>(std::lround(d_pitch * cpd)), -kSnapMaxCounts,
+                        kSnapMaxCounts);
+        // Drop the accumulated inertia so the next target switch (or a hard
+        // stop) does not inherit stale momentum.
+        inertia_dx_ = 0.f;
+        inertia_dy_ = 0.f;
+    } else {
+        // Adaptive smooth: error 0 -> menu smooth, error kErrScale -> half.
+        const float smooth_eff =
+            std::clamp(smooth * (kErrScale / (kErrScale + err_deg)), 1.f, 20.f);
+        const float target_dx = -d_yaw * cpd / (smooth_eff + 1.f);
+        const float target_dy = d_pitch * cpd / (smooth_eff + 1.f);
+        inertia_dx_ += (target_dx - inertia_dx_) * 0.5f;
+        inertia_dy_ += (target_dy - inertia_dy_) * 0.5f;
+        dx = static_cast<int>(inertia_dx_);
+        dy = static_cast<int>(inertia_dy_);
+    }
     if (dx == 0 && dy == 0) return;
     ++move_log_;
     if ((move_log_ & 0x3F) == 0)  // log every 64th steer to avoid spam

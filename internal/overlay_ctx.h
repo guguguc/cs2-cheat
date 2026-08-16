@@ -19,7 +19,8 @@ struct SharedCtx {
     bool aim_toggle = false;  // X key toggles aimbot on/off
     bool aim_active = false;  // aimbot is currently steering toward a target
     Vector3 aim_target_world{};  // locked target's head (world); used by the hint box
-    bool rcs_on = true;
+    bool aim_recoil = true;   // subtract aim punch inside the aimbot (deadlocked angle_to_target)
+    bool rcs_on = false;      // standalone recoil control (mutually exclusive with aim_recoil)
     float rcs_strength = 0.5f;  // 0..1 recoil compensation amount
     bool trigger_on = false;
     bool trigger_head_only = true;  // false = fire on any body part

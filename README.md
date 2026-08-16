@@ -17,9 +17,9 @@ needed and recoil compensation works like a real mouse).
 |---|---|
 | ESP: box + health bar + skeleton + head circle | ImGui drawn into the game's Vulkan swapchain (`internal/vk_hook.cpp` + `internal/overlay_draw.cpp`) |
 | ESP visibility colors | per-player BVH line-of-sight; visible = red, hidden = blue |
-| Aimbot (FOV-limited, smoothed, inertia, BVH visibility check) | uinput virtual mouse (TI-84 disguise), targets the head bone |
+| Aimbot (FOV-limited, adaptive smoothing + snap zone, inertia, BVH visibility check, **in-aimbot recoil comp**) | uinput virtual mouse (TI-84 disguise), targets the head bone |
 | Triggerbot | delayed fire via uinput (flash / speed / head-only checks) |
-| Standalone RCS | independent recoil compensation with adjustable strength |
+| Standalone RCS | independent recoil compensation (mutually exclusive with the aimbot's in-aimbot recoil comp) |
 | Offset resolution | Osiris-style pattern scans on the live binary + JSON config (`config/cs2_config.json`) |
 | Unified logging | thread-safe `Logger` to `/tmp/cs2_internal.log` |
 | Unload | remote `unload_self` + `injector`-based unloader tool (restores hooks, releases X11 grabs) |
